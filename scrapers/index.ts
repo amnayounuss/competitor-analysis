@@ -1,0 +1,91 @@
+/**
+ * Thin TS wrappers around the original JS scraper modules.
+ *
+ * Pattern:
+ *   1. Set the active config in scrapers/config.js (the proxy)
+ *   2. Call the original function (which reads config via the proxy)
+ *   3. Clear the active config when done (defensive)
+ *
+ * Why this exists:
+ *   The original code uses require('./config') and reads from a global. We
+ *   keep that code untouched — battle-tested with 2000+ lines of working
+ *   Puppeteer logic — and inject the per-job config via a proxy.
+ */
+
+import type { JobConfig } from './build-config';
+
+// require() the proxy + original modules (CommonJS interop)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const proxyConfig = require('./config');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _anooshFetcher  = require('./anoosh-fetcher');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _hoursScraper   = require('./hours-scraper');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _scraper        = require('./scraper');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _popularTimes   = require('./popular-times');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _analyzer       = require('./analyzer');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _excelBuilder   = require('./excel-builder');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _reportBuilder  = require('./report-builder');
+
+async function withConfig<T>(cfg: JobConfig, fn: () => Promise<T> | T): Promise<T> {
+  proxyConfig.__setActiveConfig(cfg);
+  try {
+    return await fn();
+  } finally {
+    proxyConfig.__clearActiveConfig();
+  }
+}
+
+// ── Stage A ────────────────────────────────────────────────
+export async function fetchAnoosh(cfg: JobConfig): Promise<any[]> {
+  return withConfig(cfg, () => _anooshFetcher.fetchAnoosh());
+}
+
+// ── Stage B ────────────────────────────────────────────────
+export async function scrapeHoursForAnoosh(branches: any[], cfg: JobConfig): Promise<any[]> {
+  return withConfig(cfg, () => _hoursScraper.scrapeHoursForAnoosh(branches));
+}
+
+// ── Stage C ────────────────────────────────────────────────
+export async function scrapeCompetitors(cfg: JobConfig): Promise<any[]> {
+  return withConfig(cfg, () => _scraper.scrapeCompetitors());
+}
+
+// ── Stage D ────────────────────────────────────────────────
+export async function scrapePopularTimes(places: any[], cfg: JobConfig): Promise<any[]> {
+  return withConfig(cfg, () => _popularTimes.scrapePopularTimes(places, cfg.RAW_JSON_FILE));
+}
+
+// ── Stage E ────────────────────────────────────────────────
+export function analyze(places: any[], cfg: JobConfig): any {
+  proxyConfig.__setActiveConfig(cfg);
+  try {
+    return _analyzer.analyze(places);
+  } finally {
+    proxyConfig.__clearActiveConfig();
+  }
+}
+
+// ── Stage F ────────────────────────────────────────────────
+export function writeWorkbook(analysis: any, cfg: JobConfig): string {
+  proxyConfig.__setActiveConfig(cfg);
+  try {
+    return _excelBuilder.writeWorkbook(analysis);
+  } finally {
+    proxyConfig.__clearActiveConfig();
+  }
+}
+
+export function writeReport(analysis: any, cfg: JobConfig): string {
+  proxyConfig.__setActiveConfig(cfg);
+  try {
+    return _reportBuilder.writeReport(analysis);
+  } finally {
+    proxyConfig.__clearActiveConfig();
+  }
+}
