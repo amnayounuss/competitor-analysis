@@ -1,21 +1,20 @@
 /**
- * anooshFetcher.js
+ * target-fetcher.js
  *
- * Fetches Anoosh data officially from Google APIs (Business Profile).
- * Mirrors the user's Python script and extends it to also pull reviews
- * and store the Place ID for each location (needed later to scrape
- * business hours from the public Google Maps page).
+ * Fetches the TARGET brand's data officially from Google APIs (Business
+ * Profile API) using the refresh token attached to this job. The target
+ * brand name comes from `config.targetName` and is stamped onto each
+ * returned place as `__searchBrand` so the analyzer can group them.
  *
  * API scopes required on the refresh token:
  *   https://www.googleapis.com/auth/business.manage
  *
  * What this produces (per branch):
  *   {
- *     title, address, placeId, url (Google Maps URL derived from place ID),
- *     addressLink, phone,
- *     hours: ""   ← left empty here; filled later by hoursScraper.js
+ *     title, address, placeId, url, addressLink, phone,
+ *     hours: ""   ← filled later by hours-scraper.js
  *     reviews: [ { stars, publishedAtDate, text }, ... ],
- *     __searchBrand: "Anoosh",
+ *     __searchBrand: <config.targetName>,
  *   }
  */
 
@@ -70,7 +69,9 @@ function getJson(url, accessToken) {
 // ─────────────── OAuth (same as user's script) ───────────────
 
 async function getAccessToken() {
-  const cfg = config.ANOOSH_API;
+  const cfg = config.TARGET_API;
+  // The OAuth credentials are admin-shared, but the refresh token is the
+  // per-job token supplied by the client for THEIR Google Business account.
   if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) {
     throw new Error(
       "Missing Google OAuth env vars. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN."
@@ -104,7 +105,7 @@ async function listLocationsForAccount(token, accountName) {
   let pageToken = null;
   do {
     const params = new URLSearchParams({
-      readMask: config.ANOOSH_API.readMask,
+      readMask: config.TARGET_API.readMask,
       pageSize: "100",
     });
     if (pageToken) params.set("pageToken", pageToken);
@@ -183,8 +184,9 @@ function convertReview(r) {
 
 // ─────────────── public entry point ───────────────
 
-async function fetchAnoosh() {
-  console.log("\n═══ ANOOSH: Fetching via Google Business Profile API ═══\n");
+async function fetchTarget() {
+  const brand = config.targetName || "Target";
+  console.log(`\n═══ ${brand.toUpperCase()}: Fetching via Google Business Profile API ═══\n`);
 
   const token = await getAccessToken();
   console.log("  ✓ got access token");
@@ -214,6 +216,17 @@ async function fetchAnoosh() {
         reviews = raw.map(convertReview);
       } catch {}
 
+      // Compute aggregate rating from the fetched reviews. The Business
+      // Profile API doesn't expose a place-level average, so we derive it.
+      let rating = null;
+      let reviewsCount = reviews.length;
+      if (reviews.length) {
+        const valid = reviews.filter(r => Number(r.stars) >= 1 && Number(r.stars) <= 5);
+        if (valid.length) {
+          rating = Number((valid.reduce((s, r) => s + Number(r.stars), 0) / valid.length).toFixed(2));
+        }
+      }
+
       merged.push({
         title,
         address,
@@ -222,8 +235,10 @@ async function fetchAnoosh() {
         phone,
         placeId,
         url:         mapsUrl,
+        rating,
+        reviewsCount,
         reviews,
-        __searchBrand: "Anoosh",
+        __searchBrand: brand,
       });
 
       if ((i + 1) % 10 === 0) {
@@ -234,10 +249,10 @@ async function fetchAnoosh() {
 
   const totalReviews = merged.reduce((s, b) => s + b.reviews.length, 0);
   const withPlaceId  = merged.filter((b) => b.placeId).length;
-  console.log(`\n  ✓ Anoosh: ${merged.length} branches | ${totalReviews} reviews | ${withPlaceId} have placeId`);
+  console.log(`\n  ✓ ${brand}: ${merged.length} branches | ${totalReviews} reviews | ${withPlaceId} have placeId`);
   console.log("  (business hours will be scraped from Google Maps in a later step)\n");
 
   return merged;
 }
 
-module.exports = { fetchAnoosh };
+module.exports = { fetchTarget };

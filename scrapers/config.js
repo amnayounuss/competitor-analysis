@@ -2,7 +2,7 @@
  * scrapers/config.js
  *
  * Compatibility shim. Original scraper files do `require("./config")` and
- * read properties like `config.ANOOSH_API`, `config.COMPETITORS`, etc.
+ * read properties like `config.TARGET_API`, `config.COMPETITORS`, etc.
  *
  * In the SaaS, each job has its own config object. Before invoking any
  * scraper function, `lib/job-runner.ts` calls `setActiveConfig(cfg)`.
@@ -14,14 +14,22 @@
  */
 
 let _active = null;
+let _cancelCheck = null;
 
 function setActiveConfig(cfg) { _active = cfg; }
-function clearActiveConfig()  { _active = null; }
+function clearActiveConfig()  { _active = null; _cancelCheck = null; }
+function setCancelCheck(fn)   { _cancelCheck = fn; }
+
+async function check() {
+  if (_cancelCheck) await _cancelCheck();
+}
 
 const handler = {
   get(_target, prop) {
     if (prop === '__setActiveConfig')  return setActiveConfig;
     if (prop === '__clearActiveConfig') return clearActiveConfig;
+    if (prop === '__setCancelCheck')   return setCancelCheck;
+    if (prop === '__check')            return check;
     if (!_active) {
       throw new Error(`scrapers/config.js: no active config set (tried to read .${String(prop)})`);
     }

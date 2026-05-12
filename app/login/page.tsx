@@ -18,33 +18,105 @@ export default function LoginPage() {
     setLoading(true);
     const { error } = await sb.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) setErr(error.message);
-    else router.push('/dashboard');
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+
+    const { data: { user } } = await sb.auth.getUser();
+    if (user) {
+      const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
+      if (profile?.is_admin) { router.push('/admin'); return; }
+
+      // First-time clients: send straight to DB setup screen
+      const r = await fetch('/api/client-db', { cache: 'no-store' });
+      const j = r.ok ? await r.json() : null;
+      if (!j?.connection?.last_test_ok) {
+        router.push('/connect-database');
+      } else {
+        router.push('/dashboard');
+      }
+    }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4">
-      <form onSubmit={onSubmit} className="w-full max-w-sm bg-white shadow-sm rounded-lg p-8 space-y-5 border">
-        <h1 className="text-2xl font-semibold">Sign in</h1>
-        {err && <div className="bg-red-50 text-red-700 text-sm rounded p-3">{err}</div>}
-        <div>
-          <label className="block text-sm font-medium mb-1">Email</label>
-          <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-            className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    <main className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+      {/* Decorative background elements */}
+      <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-100/20 rounded-full blur-[120px]" />
+      </div>
+
+      <div className="w-full max-w-[400px] relative z-10">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 mb-6 group transition-transform hover:rotate-6">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight text-slate-900">Welcome Back</h1>
+          <p className="text-slate-500 mt-2 font-medium">Continue to your analysis dashboard</p>
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Password</label>
-          <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-            className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <button type="submit" disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded py-2 font-medium">
-          {loading ? 'Signing in…' : 'Sign in'}
-        </button>
-        <p className="text-sm text-gray-600 text-center">
-          New here? <Link href="/signup" className="text-blue-600 hover:underline">Create an account</Link>
+
+        <form onSubmit={onSubmit} className="modern-card p-10 space-y-6">
+          {err && (
+            <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm font-medium rounded-xl p-4 flex items-center gap-3 animate-shake">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              {err}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Email address</label>
+            <input 
+              type="email" 
+              required 
+              value={email} 
+              onChange={e => setEmail(e.target.value)}
+              placeholder="name@company.com"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between items-center px-1">
+              <label className="block text-sm font-bold text-slate-700 tracking-tight">Password</label>
+              <button type="button" className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors">Forgot?</button>
+            </div>
+            <input 
+              type="password" 
+              required 
+              value={password} 
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full btn-primary py-3.5 text-base shadow-xl shadow-indigo-600/20"
+          >
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Authenticating...
+              </span>
+            ) : 'Sign in to Account'}
+          </button>
+
+          <div className="pt-4 text-center">
+            <p className="text-sm text-slate-500 font-medium">
+              Don't have an account? <Link href="/signup" className="text-indigo-600 font-bold hover:underline">Create one for free</Link>
+            </p>
+          </div>
+        </form>
+
+        <p className="mt-8 text-center text-xs text-slate-400 font-medium tracking-wide uppercase">
+          &copy; 2026 Reviews Analytics &bull; Secure Connection
         </p>
-      </form>
+      </div>
     </main>
   );
 }

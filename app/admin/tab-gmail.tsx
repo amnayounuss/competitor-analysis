@@ -46,72 +46,120 @@ export default function GmailTab({ settings, reload }: Props) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold">Gmail OAuth (sender)</h2>
-        <p className="text-sm text-gray-500">Account that sends report emails. Uses OAuth2 with refresh token.</p>
-      </div>
-      {msg && <div className={`${msg.type==='ok'?'bg-green-50 text-green-700':'bg-red-50 text-red-700'} text-sm rounded p-3`}>{msg.text}</div>}
-
-      <Field label="Gmail address">
-        <input className="input" type="email" value={user} onChange={e => setUser(e.target.value)} />
-      </Field>
-
-      <Field label="From display name">
-        <input className="input" type="text" value={fromName} onChange={e => setFromName(e.target.value)} />
-      </Field>
-
-      <Field label="OAuth Client ID">
-        <input className="input font-mono" type="text" value={clientId} onChange={e => setClientId(e.target.value)}
-          placeholder="xxxxx.apps.googleusercontent.com" />
-      </Field>
-
-      <Field label="OAuth Client Secret" hint={`Currently: ${settings.gmail_oauth_client_secret || '(not set)'} — leave blank to keep`}>
-        <input className="input font-mono" type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)}
-          placeholder="GOCSPX-..." />
-      </Field>
-
-      <Field label="Refresh Token" hint={`Currently: ${settings.gmail_refresh_token || '(not set)'} — leave blank to keep`}>
-        <input className="input font-mono" type="password" value={refreshToken} onChange={e => setRefreshToken(e.target.value)}
-          placeholder="1//0gK..." />
-        <p className="text-xs text-gray-500 mt-1">
-          Get from <a className="underline text-blue-600" target="_blank" href="https://developers.google.com/oauthplayground">OAuth Playground</a> with scope <code className="bg-gray-100 px-1">https://mail.google.com</code>
-        </p>
-      </Field>
-
-      <div className="flex gap-3">
-        <button onClick={save} disabled={saving}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm rounded px-4 py-2 font-medium">
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Gmail OAuth</h2>
+        <p className="text-sm text-slate-500 mt-1">Configure the outbound mail server for automated report delivery.</p>
       </div>
 
-      <div className="border-t pt-5">
-        <h3 className="font-medium text-sm mb-2">Send test email</h3>
-        <div className="flex gap-2">
-          <input className="input flex-1" type="email" value={testTo} onChange={e => setTestTo(e.target.value)}
-            placeholder="[email protected]" />
-          <button onClick={sendTest} disabled={testing || !testTo}
-            className="border text-sm rounded px-4 py-2 hover:bg-gray-50 disabled:opacity-50">
-            {testing ? 'Sending…' : 'Send test'}
-          </button>
+      {msg && (
+        <div className={`text-sm font-medium rounded-xl p-4 flex items-center gap-3 border ${
+          msg.type === 'ok' 
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+            : 'bg-rose-50 text-rose-700 border-rose-100'
+        }`}>
+          <div className={`w-2 h-2 rounded-full ${msg.type === 'ok' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          {msg.text}
+        </div>
+      )}
+
+      <div className="grid gap-6">
+        <Field label="Gmail address">
+          <input 
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            type="email" 
+            value={user} 
+            onChange={e => setUser(e.target.value)} 
+          />
+        </Field>
+
+        <Field label="From display name">
+          <input 
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            type="text" 
+            value={fromName} 
+            onChange={e => setFromName(e.target.value)} 
+          />
+        </Field>
+
+        <Field label="OAuth Client ID">
+          <input 
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            type="text" 
+            value={clientId} 
+            onChange={e => setClientId(e.target.value)}
+            placeholder="xxxxx.apps.googleusercontent.com" 
+          />
+        </Field>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Field label="OAuth Client Secret" hint={settings.gmail_oauth_client_secret ? 'Secret is securely stored' : 'Not set yet'}>
+            <input 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+              type="password" 
+              value={clientSecret} 
+              onChange={e => setClientSecret(e.target.value)}
+              placeholder="••••••••••••" 
+            />
+          </Field>
+
+          <Field label="Refresh Token" hint={settings.gmail_refresh_token ? 'Token is securely stored' : 'Not set yet'}>
+            <input 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+              type="password" 
+              value={refreshToken} 
+              onChange={e => setRefreshToken(e.target.value)}
+              placeholder="••••••••••••" 
+            />
+          </Field>
         </div>
       </div>
 
-      <style jsx>{`
-        .input { width:100%; border:1px solid #d1d5db; border-radius:6px; padding:8px 12px; font-size:14px; outline:none; }
-        .input:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.2); }
-      `}</style>
+      <div className="flex items-center justify-between pt-4">
+        <p className="text-xs text-slate-400">
+          Obtain tokens from <a className="text-indigo-600 font-semibold hover:underline" target="_blank" rel="noreferrer" href="https://developers.google.com/oauthplayground">OAuth Playground</a>
+        </p>
+        <button 
+          onClick={save} 
+          disabled={saving}
+          className="btn-primary shadow-xl shadow-indigo-600/20"
+        >
+          {saving ? 'Synchronizing…' : 'Save Configuration'}
+        </button>
+      </div>
+
+      <div className="pt-10 border-t border-slate-100">
+        <div className="mb-4">
+          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Connectivity Test</h3>
+          <p className="text-xs text-slate-400">Send a verification email to confirm settings.</p>
+        </div>
+        <div className="flex gap-3">
+          <input 
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" 
+            type="email" 
+            value={testTo} 
+            onChange={e => setTestTo(e.target.value)}
+            placeholder="Recipient email address" 
+          />
+          <button 
+            onClick={sendTest} 
+            disabled={testing || !testTo}
+            className="btn-secondary px-6"
+          >
+            {testing ? 'Sending…' : 'Run Test'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
+    <div className="space-y-1.5">
+      <label className="block text-sm font-bold text-slate-700 tracking-tight">{label}</label>
       {children}
-      {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">{hint}</p>}
     </div>
   );
 }

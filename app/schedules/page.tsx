@@ -11,13 +11,18 @@ export default async function SchedulesPage() {
   if (!user) redirect('/login');
 
   return (
-    <main className="max-w-3xl mx-auto p-6">
-      <header className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Monthly schedules</h1>
-          <p className="text-sm text-gray-600">Auto-runs on the 1st of every month at 9 AM UTC</p>
+    <main className="max-w-4xl mx-auto p-8 space-y-12">
+      <header className="flex items-end justify-between border-b border-slate-100 pb-8">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100 mb-2">
+            Automations
+          </div>
+          <h1 className="text-4xl font-bold text-slate-900 tracking-tight">Recurring Cycles</h1>
+          <p className="text-sm font-medium text-slate-500">Autonomous reports scheduled for the 1st of every month.</p>
         </div>
-        <Link href="/dashboard" className="text-sm border rounded px-3 py-1.5 hover:bg-gray-50">← Dashboard</Link>
+        <Link href="/dashboard" className="btn-secondary px-5 py-2.5 text-xs">
+          ← Return to Command
+        </Link>
       </header>
       <SchedulesList />
     </main>

@@ -1,3 +1,40 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --font-sans: var(--font-jakarta), system-ui, sans-serif;
+    --font-display: var(--font-outfit), system-ui, sans-serif;
+  }
+
+  body {
+    @apply font-sans;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading tracking-tight;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)];
+  }
+
+  .modern-card {
+    @apply bg-white border border-slate-100 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] rounded-2xl;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-600 text-white px-4 py-2 rounded-xl font-medium transition-all hover:bg-indigo-700 hover:shadow-lg active:scale-95 disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl font-medium transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-95;
+  }
+
+  .nav-link-active {
+    @apply relative text-indigo-600 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-indigo-600 after:rounded-full;
+  }
+}

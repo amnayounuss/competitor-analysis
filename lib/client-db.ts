@@ -90,10 +90,13 @@ export async function testClientDb(creds: ClientDbCreds): Promise<{
     if (hasAuthFail) {
       return { ok: false, error: 'Service role key was rejected. Double-check the key is from "Settings → API → service_role".' };
     }
+    
+    // Concatenate unique error messages for missing tables
+    const uniqueMsgs = Array.from(new Set(errs.map(e => e!.message))).join(', ');
     return {
       ok: true,
       schemaReady: false,
-      error: 'Connected, but the schema is missing. Run client-schema.sql in your SQL editor.',
+      error: `Missing tables or types (${uniqueMsgs}). Please run the client-schema.sql in your SQL editor.`,
     };
   } catch (e: any) {
     return { ok: false, error: 'Connection failed: ' + (e.message || 'unknown') };

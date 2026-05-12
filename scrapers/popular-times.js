@@ -334,13 +334,26 @@ async function scrapePopularTimes(allBranches, cacheFilePath) {
       const short = (b.title || "").slice(0, 40);
       process.stdout.write(`  [${i + 1}/${allBranches.length}] ${short} ... `);
 
+      // Verify URL before navigating
+      const navUrl = b.placeId ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}` : b.url;
+      if (!navUrl) {
+        console.log("✗ (missing URL)");
+        b.popularTimes = { available: false, grid: {}, summary: "" };
+        stats.failed++;
+        continue;
+      }
+
       // Try fast only first (cheap)
-      await page.goto(
-        b.placeId ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}` : b.url,
-        { waitUntil: "networkidle2", timeout: 60000 }
-      );
-      await sleep(2500);
-      await dismissConsent(page);
+      try {
+        await page.goto(navUrl, { waitUntil: "networkidle2", timeout: 60000 });
+        await sleep(2500);
+        await dismissConsent(page);
+      } catch (navErr) {
+        console.log(`✗ (nav failed: ${navErr.message})`);
+        b.popularTimes = { available: false, grid: {}, summary: "" };
+        stats.failed++;
+        continue;
+      }
 
       let grid = await extractViaHtmlParse(page);
       let method = "fast";

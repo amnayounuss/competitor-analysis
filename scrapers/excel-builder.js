@@ -242,9 +242,13 @@ function buildDashboardSheet(brandRows, branchRows, bestBranch, worstBranch) {
   const totalReviews  = branchRows.reduce((s, r) => s + r.totalReviews3m, 0);
   const totalPTCovered = branchRows.filter((r) => r.popularTimes && r.popularTimes.available).length;
 
+  const target = config.targetName || "Target";
+  const windowLabel = (config.DATE_START && config.DATE_END)
+    ? `Analysis window: ${config.DATE_START} → ${config.DATE_END}`
+    : `Analysis window: last ${config.LOOKBACK_MONTHS} months`;
   const rows = [
-    ["Anoosh Competitor Analysis — Dashboard"],
-    [`Analysis window: last ${config.LOOKBACK_MONTHS} months`],
+    [`${target} Competitor Analysis — Dashboard`],
+    [windowLabel],
     [`Generated: ${new Date().toISOString().slice(0, 10)}`],
     [],
     ["Metric", "Value"],

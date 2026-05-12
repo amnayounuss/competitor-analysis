@@ -23,56 +23,77 @@ export default function GmbTab({ settings, reload }: Props) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <div>
-        <h2 className="text-lg font-semibold">Google Business Profile OAuth</h2>
-        <p className="text-sm text-gray-500">
-          Separate Google Cloud project for the Business Profile API.
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Business Profile API</h2>
+        <p className="text-sm text-slate-500 mt-1">Configure the Google Cloud project for local search data extraction.</p>
+      </div>
+
+      {msg && (
+        <div className={`text-sm font-medium rounded-xl p-4 flex items-center gap-3 border ${
+          msg.type === 'ok' 
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+            : 'bg-rose-50 text-rose-700 border-rose-100'
+        }`}>
+          <div className={`w-2 h-2 rounded-full ${msg.type === 'ok' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          {msg.text}
+        </div>
+      )}
+
+      <div className="grid gap-6">
+        <Field label="Client ID">
+          <input 
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            type="text" 
+            value={clientId} 
+            onChange={e => setClientId(e.target.value)}
+            placeholder="xxxxx.apps.googleusercontent.com" 
+          />
+        </Field>
+
+        <Field label="Client Secret" hint={settings.gmb_oauth_client_secret ? 'Secret is securely stored' : 'Not set yet'}>
+          <input 
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+            type="password" 
+            value={clientSecret}
+            onChange={e => setClientSecret(e.target.value)} 
+            placeholder="••••••••••••" 
+          />
+        </Field>
+      </div>
+
+      <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6">
+        <h3 className="font-bold text-indigo-900 text-sm mb-2 flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Implementation Notes
+        </h3>
+        <p className="text-xs text-indigo-800/80 leading-relaxed">
+          Required scope: <code className="bg-white/60 px-1.5 py-0.5 rounded text-indigo-900 font-bold">.../auth/business.manage</code>
+        </p>
+        <p className="text-xs text-indigo-800/80 mt-2 leading-relaxed italic">
+          Clients will generate refresh tokens under this OAuth app. These tokens are then used in the job submission flow to authorize data retrieval.
         </p>
       </div>
 
-      {msg && <div className={`${msg.type==='ok'?'bg-green-50 text-green-700':'bg-red-50 text-red-700'} text-sm rounded p-3`}>{msg.text}</div>}
-
-      <Field label="Client ID">
-        <input className="input font-mono" type="text" value={clientId} onChange={e => setClientId(e.target.value)}
-          placeholder="xxxxx.apps.googleusercontent.com" />
-      </Field>
-
-      <Field label="Client Secret" hint={`Currently: ${settings.gmb_oauth_client_secret || '(not set)'} — leave blank to keep`}>
-        <input className="input font-mono" type="password" value={clientSecret}
-          onChange={e => setClientSecret(e.target.value)} placeholder="GOCSPX-..." />
-      </Field>
-
-      <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm">
-        <p className="font-medium text-blue-900 mb-1">How clients use this</p>
-        <p className="text-xs text-blue-800">
-          Required scope: <code className="bg-white px-1">https://www.googleapis.com/auth/business.manage</code>
-        </p>
-        <p className="text-xs text-blue-800 mt-1">
-          Each client generates a refresh token under THIS OAuth app and pastes it into their job submission form.
-          You don't need to manage their tokens here.
-        </p>
+      <div className="flex justify-end">
+        <button 
+          onClick={save} 
+          disabled={saving}
+          className="btn-primary shadow-xl shadow-indigo-600/20"
+        >
+          {saving ? 'Synchronizing…' : 'Update Project Settings'}
+        </button>
       </div>
-
-      <button onClick={save} disabled={saving}
-        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm rounded px-4 py-2 font-medium">
-        {saving ? 'Saving…' : 'Save changes'}
-      </button>
-
-      <style jsx>{`
-        .input { width:100%; border:1px solid #d1d5db; border-radius:6px; padding:8px 12px; font-size:14px; outline:none; }
-        .input:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.2); }
-      `}</style>
     </div>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
+    <div className="space-y-1.5">
+      <label className="block text-sm font-bold text-slate-700 tracking-tight">{label}</label>
       {children}
-      {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">{hint}</p>}
     </div>
   );
 }

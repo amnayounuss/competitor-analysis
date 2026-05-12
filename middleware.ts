@@ -42,16 +42,16 @@ export async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(n) { return req.cookies.get(n)?.value; },
-        set(n, v, o: CookieOptions) {
-          req.cookies.set({ name:n, value:v, ...o });
+        get(n: string) { return req.cookies.get(n)?.value; },
+        set(n: string, v: string, o: CookieOptions) {
+          req.cookies.set({ name: n, value: v, ...o });
           res = NextResponse.next({ request: { headers: req.headers } });
-          res.cookies.set({ name:n, value:v, ...o });
+          res.cookies.set({ name: n, value: v, ...o });
         },
-        remove(n, o: CookieOptions) {
-          req.cookies.set({ name:n, value:'', ...o });
+        remove(n: string, o: CookieOptions) {
+          req.cookies.set({ name: n, value: '', ...o });
           res = NextResponse.next({ request: { headers: req.headers } });
-          res.cookies.set({ name:n, value:'', ...o });
+          res.cookies.set({ name: n, value: '', ...o });
         },
       },
     },
@@ -62,9 +62,13 @@ export async function middleware(req: NextRequest) {
 
   if (needsAuth && !user) return NextResponse.redirect(new URL('/login', req.url));
 
-  // ── Client DB connection gate (skip for /connect-database itself + admin pages) ──
+  // ── Client DB connection gate (skip for /connect-database itself + admin pages + Admins) ──
   if (user && (path.startsWith('/dashboard') || path.startsWith('/jobs') || path.startsWith('/schedules'))) {
     try {
+      // Check if user is admin (exempt from forced DB setup)
+      const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
+      if (profile?.is_admin) return res;
+
       const r = await fetch(new URL('/api/client-db', req.url), {
         headers: { cookie: req.headers.get('cookie') || '' }, cache: 'no-store',
       });

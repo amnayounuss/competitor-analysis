@@ -23,6 +23,13 @@ export async function GET() {
     .order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // Get database connections
+  const { data: dbConns } = await sb.from('client_databases').select('user_id, last_test_ok, updated_at');
+  const connections: Record<string, { ok: boolean; at: string }> = {};
+  for (const c of dbConns || []) {
+    connections[c.user_id] = { ok: !!c.last_test_ok, at: c.updated_at };
+  }
+
   // Count jobs per user
   const { data: jobs } = await sb.from('jobs').select('user_id, status');
   const counts: Record<string, { total: number; running: number }> = {};
@@ -32,12 +39,17 @@ export async function GET() {
     if (j.status === 'running' || j.status === 'queued') counts[j.user_id].running += 1;
   }
 
+  const allUsers = (profiles || []).map(p => ({
+    ...p,
+    jobs_total:   counts[p.id]?.total   || 0,
+    jobs_active:  counts[p.id]?.running || 0,
+    db_connected: connections[p.id]?.ok || false,
+    db_updated_at: connections[p.id]?.at || null,
+  }));
+
   return NextResponse.json({
-    users: (profiles || []).map(p => ({
-      ...p,
-      jobs_total:   counts[p.id]?.total   || 0,
-      jobs_active:  counts[p.id]?.running || 0,
-    })),
+    admins: allUsers.filter(u => u.is_admin),
+    clients: allUsers.filter(u => !u.is_admin),
   });
 }
 

@@ -1,10 +1,12 @@
 /**
- * reportBuilder.js
+ * report-builder.js
  * Writes a Markdown analytical report covering brand performance, competitive
- * insights, customer sentiment, key findings, and Anoosh-specific recommendations.
+ * insights, customer sentiment, key findings, and target-brand recommendations.
  *
- * Sentiment analysis here is keyword-based (lightweight and deterministic) — it
- * does not replace human qualitative review, but surfaces the most common themes.
+ * The target brand is taken from `config.targetName`. All comparisons are
+ * driven by the brands present in the analyzed dataset — no hardcoded names.
+ *
+ * Sentiment analysis is keyword-based (lightweight, deterministic).
  */
 
 const fs = require("fs");
@@ -99,17 +101,25 @@ function buildReport(analysis) {
   const consistencyByBrand = {};
   for (const b of brandRows) consistencyByBrand[b.brand] = ratingStdDev(b.branches);
 
-  const anoosh  = brandRows.find((b) => b.brand === "Anoosh");
-  const patchi  = brandRows.find((b) => b.brand === "Patchi");
-  const bostani = brandRows.find((b) => b.brand === "Bostani");
+  const targetName = config.targetName || (brandRows[0] && brandRows[0].brand) || "Target";
+  const target     = brandRows.find((b) => b.brand === targetName) || null;
+  const competitorRows = brandRows.filter((b) => b.brand !== targetName);
+
+  const title = competitorRows.length
+    ? `${targetName} vs ${competitorRows.map(b => b.brand).join(' vs ')}`
+    : `${targetName}`;
+
+  const windowLabel = (config.DATE_START && config.DATE_END)
+    ? `${config.DATE_START} → ${config.DATE_END}`
+    : `${cutoffDate.toISOString().slice(0, 10)} → ${today.toISOString().slice(0, 10)} (last ${config.LOOKBACK_MONTHS} months)`;
 
   // ===== Markdown =====
   const lines = [];
   const H = (s) => lines.push(s);
 
-  H(`# Anoosh vs Patchi vs Bostani — Google Maps Competitor Analysis`);
+  H(`# ${title} — Google Maps Competitor Analysis`);
   H(``);
-  H(`**Report window:** ${cutoffDate.toISOString().slice(0, 10)} → ${today.toISOString().slice(0, 10)} (last ${config.LOOKBACK_MONTHS} months)`);
+  H(`**Report window:** ${windowLabel}`);
   H(`**Data source:** Google Maps public reviews, scraped via Apify`);
   H(`**Expected accuracy:** ~90–95% — Google Maps does not publish historical rating data, so all metrics are derived from review publish dates.`);
   H(``);
@@ -142,7 +152,7 @@ function buildReport(analysis) {
   H(``);
 
   // ---- Competitive Insights ----
-  H(`## 2. Competitive Insights — Anoosh vs Patchi vs Bostani`);
+  H(`## 2. Competitive Insights — ${title}`);
   H(``);
   for (const b of brandRows) {
     H(`### ${b.brand}`);
@@ -255,54 +265,55 @@ function buildReport(analysis) {
   }
   H(``);
 
-  // ---- Recommendations for Anoosh ----
-  H(`## 5. Recommendations for Anoosh`);
+  // ---- Recommendations for the target brand ----
+  H(`## 5. Recommendations for ${targetName}`);
   H(``);
 
-  if (!anoosh) {
-    H(`_No Anoosh data available in the window — unable to produce recommendations._`);
+  if (!target) {
+    H(`_No ${targetName} data available in the window — unable to produce recommendations._`);
   } else {
-    const anooshSent    = sentimentByBrand.Anoosh;
-    const patchiSent    = patchi  ? sentimentByBrand.Patchi  : null;
-    const bostaniSent   = bostani ? sentimentByBrand.Bostani : null;
-    const anooshSigma   = consistencyByBrand.Anoosh;
+    const targetSent  = sentimentByBrand[targetName];
+    const targetSigma = consistencyByBrand[targetName];
 
-    // How Anoosh can outperform competitors
-    H(`### How Anoosh can outperform competitors`);
+    // How target can outperform each competitor
+    H(`### How ${targetName} can outperform competitors`);
     H(``);
-    if (patchi && anoosh.avgRating3m !== null && patchi.avgRating3m !== null) {
-      const gap = Number((patchi.avgRating3m - anoosh.avgRating3m).toFixed(2));
+    let saidSomething = false;
+    for (const comp of competitorRows) {
+      const compSent = sentimentByBrand[comp.brand];
+      if (target.avgRating3m === null || comp.avgRating3m === null) continue;
+      const gap = Number((comp.avgRating3m - target.avgRating3m).toFixed(2));
       if (gap > 0) {
-        H(`- Anoosh trails **Patchi** by ${gap}⭐ on average rating. Patchi's strongest theme is *${Object.entries(patchiSent).sort((a, c) => c[1].net - a[1].net)[0][0]}* — Anoosh should benchmark and close that specific gap rather than trying to match every dimension at once.`);
+        const topTheme = compSent
+          ? Object.entries(compSent).sort((a, c) => c[1].net - a[1].net)[0]?.[0] || 'overall experience'
+          : 'overall experience';
+        H(`- ${targetName} trails **${comp.brand}** by ${gap}⭐ on average rating. ${comp.brand}'s strongest theme is *${topTheme}* — ${targetName} should benchmark and close that specific gap rather than trying to match every dimension at once.`);
+        saidSomething = true;
       } else if (gap < 0) {
-        H(`- Anoosh leads **Patchi** by ${Math.abs(gap)}⭐. The priority is **defending** that lead: keep the top-rated branches as flagship references and port their SOPs to lower-rated ones.`);
+        H(`- ${targetName} leads **${comp.brand}** by ${Math.abs(gap)}⭐. The priority is **defending** that lead: keep the top-rated branches as flagship references and port their SOPs to lower-rated ones.`);
+        saidSomething = true;
       }
     }
-    if (bostani && anoosh.avgRating3m !== null && bostani.avgRating3m !== null) {
-      const gap = Number((bostani.avgRating3m - anoosh.avgRating3m).toFixed(2));
-      if (gap > 0) {
-        H(`- Anoosh trails **Bostani** by ${gap}⭐. Bostani's strongest theme is *${Object.entries(bostaniSent).sort((a, c) => c[1].net - a[1].net)[0][0]}* — a natural area to study and counter-position against.`);
-      } else if (gap < 0) {
-        H(`- Anoosh leads **Bostani** by ${Math.abs(gap)}⭐. Focus marketing on the themes where the gap is largest, not just the overall star rating.`);
-      }
+    if (!saidSomething) {
+      H(`- No clear rating gap with competitors — focus on increasing review volume and theme strength rather than chasing a star-rating delta.`);
     }
     H(``);
 
     // Service improvements
     H(`### Service improvements`);
     H(``);
-    if (anooshSent.service.net < 0) {
-      H(`- Service sentiment is net-negative (${anooshSent.service.net}). Recurring complaint keywords are the highest-leverage fix: train staff on greeting, speed of handover, and handling of special requests.`);
+    if (targetSent.service.net < 0) {
+      H(`- Service sentiment is net-negative (${targetSent.service.net}). Recurring complaint keywords are the highest-leverage fix: train staff on greeting, speed of handover, and handling of special requests.`);
     } else {
-      H(`- Service sentiment is net-positive (${anooshSent.service.net}). Lock this in with a documented service standard so it survives staff turnover.`);
+      H(`- Service sentiment is net-positive (${targetSent.service.net}). Lock this in with a documented service standard so it survives staff turnover.`);
     }
-    const weakAnooshBranches = anoosh.branches
+    const weakBranches = target.branches
       .filter((br) => br.avgRating3m !== null && br.avgRating3m < 4 && br.totalReviews3m >= 3)
       .sort((a, c) => a.avgRating3m - c.avgRating3m)
       .slice(0, 5);
-    if (weakAnooshBranches.length) {
+    if (weakBranches.length) {
       H(`- **Branches needing immediate attention:**`);
-      for (const br of weakAnooshBranches) {
+      for (const br of weakBranches) {
         H(`  - ${br.branchName} — ${br.avgRating3m}⭐ over ${br.totalReviews3m} reviews (${br.stars1 + br.stars2} negative reviews in window)`);
       }
     }
@@ -311,33 +322,34 @@ function buildReport(analysis) {
     // Customer experience strategy
     H(`### Customer experience strategy`);
     H(``);
-    if (anooshSigma !== null && anooshSigma >= 0.5) {
-      H(`- Branch consistency is weak (σ=${anooshSigma}). A customer's experience depends heavily on which Anoosh they walk into. Recommended: mystery-shop the bottom-quartile branches, identify the 2–3 operational variables that correlate with low ratings, and standardize them chain-wide.`);
-    } else if (anooshSigma !== null) {
-      H(`- Branch consistency is strong (σ=${anooshSigma}) — use this in marketing as a competitive differentiator against higher-variance competitors.`);
+    if (targetSigma !== null && targetSigma >= 0.5) {
+      H(`- Branch consistency is weak (σ=${targetSigma}). A customer's experience depends heavily on which ${targetName} branch they walk into. Recommended: mystery-shop the bottom-quartile branches, identify the 2–3 operational variables that correlate with low ratings, and standardize them chain-wide.`);
+    } else if (targetSigma !== null) {
+      H(`- Branch consistency is strong (σ=${targetSigma}) — use this in marketing as a competitive differentiator against higher-variance competitors.`);
     }
-    if (anooshSent.productQuality.net < 0) {
-      H(`- Product-quality sentiment is net-negative. Audit freshness, sourcing, and in-store storage — these are the most frequent drivers of 1–2⭐ reviews for gift-confectionery brands.`);
+    if (targetSent.productQuality.net < 0) {
+      H(`- Product-quality sentiment is net-negative. Audit freshness, sourcing, and in-store storage — these are the most frequent drivers of 1–2⭐ reviews.`);
     }
-    if (anooshSent.priceValue.net < 0) {
-      H(`- Price-value sentiment is net-negative. Options: reinforce premium positioning (packaging, exclusive gift sets) OR introduce a clear entry-price tier. Doing neither risks being seen as expensive without feeling premium.`);
+    if (targetSent.priceValue.net < 0) {
+      H(`- Price-value sentiment is net-negative. Options: reinforce premium positioning OR introduce a clear entry-price tier. Doing neither risks being seen as expensive without feeling premium.`);
     }
     H(`- **Review-response discipline:** respond to every 1–2⭐ review within 48 hours. Google weighs recency and response rate; this alone tends to lift visible star ratings within a quarter.`);
-    H(`- **Flagship branches:** publicly showcase the top 2–3 Anoosh branches (${(anoosh.branches
-        .filter((br) => br.avgRating3m !== null && br.totalReviews3m >= 5)
-        .sort((a, c) => c.avgRating3m - a.avgRating3m)
-        .slice(0, 3)
-        .map((br) => br.branchName)
-        .join(", ")) || "top performers"}) as proof points, and use them as training sites for underperformers.`);
+    const flagshipNames = target.branches
+      .filter((br) => br.avgRating3m !== null && br.totalReviews3m >= 5)
+      .sort((a, c) => c.avgRating3m - a.avgRating3m)
+      .slice(0, 3)
+      .map((br) => br.branchName)
+      .join(", ");
+    H(`- **Flagship branches:** publicly showcase the top 2–3 ${targetName} branches (${flagshipNames || "top performers"}) as proof points, and use them as training sites for underperformers.`);
     H(``);
   }
 
   // ---- Methodology & caveats ----
   H(`## Methodology & Caveats`);
   H(``);
-  H(`- **Source:** Google Maps public reviews, collected via the Apify Google Maps Scraper.`);
-  H(`- **Window:** reviews where \`publishedAtDate >= today − ${config.LOOKBACK_MONTHS} months\`.`);
-  H(`- **Brand assignment:** substring match on branch title — "Anoosh" → Anoosh, "Patchi" → Patchi, otherwise Bostani.`);
+  H(`- **Source:** Google Maps public reviews, collected via Puppeteer + Google Business Profile API.`);
+  H(`- **Window:** ${windowLabel}.`);
+  H(`- **Brand assignment:** scrapers tag each place with its searched brand. Untagged places fall back to a substring match against the job's target + competitor names; anything that still doesn't match is grouped as "Other".`);
   H(`- **Brand-level average rating:** weighted by number of reviews per branch (prevents a 1-review branch from distorting the brand mean).`);
   H(`- **Sentiment:** deterministic keyword counting — surfaces themes, not a substitute for reading the reviews.`);
   H(`- **Accuracy:** ~90–95%. Google Maps does not expose historical ratings, search results can vary by region/language, and a small number of reviews lack a usable publish date and are excluded.`);

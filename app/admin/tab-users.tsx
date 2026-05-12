@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 
 export default function UsersTab() {
-  const [users, setUsers] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [msg, setMsg] = useState<{type:'ok'|'err';text:string}|null>(null);
@@ -11,14 +11,13 @@ export default function UsersTab() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [makeAdmin, setMakeAdmin] = useState(false);
   const [creating, setCreating] = useState(false);
 
   async function load() {
     setLoading(true);
     const r = await fetch('/api/admin/users');
     const j = await r.json();
-    setUsers(j.users || []);
+    setClients(j.clients || []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -27,82 +26,142 @@ export default function UsersTab() {
     setMsg(null); setCreating(true);
     const r = await fetch('/api/admin/users', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ email, password, full_name: fullName, is_admin: makeAdmin }),
+      body: JSON.stringify({ email, password, full_name: fullName, is_admin: false }),
     });
     setCreating(false);
     if (!r.ok) { const j = await r.json(); setMsg({type:'err', text: typeof j.error === 'string' ? j.error : 'create failed'}); return; }
-    setMsg({type:'ok', text:`Created ${email}`});
-    setEmail(''); setPassword(''); setFullName(''); setMakeAdmin(false); setShowCreate(false);
+    setMsg({type:'ok', text:`Provisioned client: ${email}`});
+    setEmail(''); setPassword(''); setFullName(''); setShowCreate(false);
     load();
   }
 
   async function remove(id: string, email: string) {
-    if (!confirm(`Delete user ${email}? All their jobs and logs will also be deleted.`)) return;
+    if (!confirm(`Revoke access for ${email}? All their data will be deleted.`)) return;
     const r = await fetch(`/api/admin/users?id=${id}`, { method:'DELETE' });
-    if (!r.ok) { const j = await r.json(); setMsg({type:'err', text: j.error || 'delete failed'}); return; }
-    setMsg({type:'ok', text: `Deleted ${email}`});
+    if (!r.ok) { const j = await r.json(); setMsg({type:'err', text: j.error || 'revoke failed'}); return; }
+    setMsg({type:'ok', text: `Access revoked for ${email}`});
     load();
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Users</h2>
-          <p className="text-sm text-gray-500">{users.length} total</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Client Management</h2>
+          <p className="text-sm text-slate-500 mt-1">{clients.length} provisioned client accounts</p>
         </div>
-        <button onClick={() => setShowCreate(!showCreate)}
-          className="text-sm bg-blue-600 hover:bg-blue-700 text-white rounded px-4 py-2 font-medium">
-          {showCreate ? 'Cancel' : '+ Add user'}
+        <button 
+          onClick={() => setShowCreate(!showCreate)}
+          className={showCreate ? 'btn-secondary px-6' : 'btn-primary px-6 shadow-xl shadow-indigo-600/20'}
+        >
+          {showCreate ? 'Dismiss Form' : '+ Provision New Client'}
         </button>
       </div>
 
-      {msg && <div className={`${msg.type==='ok'?'bg-green-50 text-green-700':'bg-red-50 text-red-700'} text-sm rounded p-3`}>{msg.text}</div>}
-
-      {showCreate && (
-        <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-          <h3 className="font-medium text-sm">Create new user</h3>
-          <input className="input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-          <input className="input" type="password" placeholder="Password (8+ chars)" value={password} onChange={e => setPassword(e.target.value)} minLength={8} />
-          <input className="input" type="text" placeholder="Full name (optional)" value={fullName} onChange={e => setFullName(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={makeAdmin} onChange={e => setMakeAdmin(e.target.checked)} />
-            Make this user an admin
-          </label>
-          <button onClick={create} disabled={creating || !email.includes('@') || password.length < 8}
-            className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm rounded px-4 py-2 font-medium">
-            {creating ? 'Creating…' : 'Create user'}
-          </button>
+      {msg && (
+        <div className={`text-sm font-medium rounded-xl p-4 flex items-center gap-3 border animate-in fade-in slide-in-from-top-2 ${
+          msg.type === 'ok' 
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+            : 'bg-rose-50 text-rose-700 border-rose-100'
+        }`}>
+          <div className={`w-2 h-2 rounded-full ${msg.type === 'ok' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          {msg.text}
         </div>
       )}
 
-      {loading ? <p className="text-sm text-gray-500">Loading…</p> : (
-        <div className="border rounded-lg overflow-hidden">
+      {showCreate && (
+        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-8 space-y-6 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Field label="Client Email">
+              <input className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" type="email" placeholder="client@company.com" value={email} onChange={e => setEmail(e.target.value)} />
+            </Field>
+            <Field label="Initial Password">
+              <input className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} minLength={8} />
+            </Field>
+          </div>
+          <Field label="Client Name">
+            <input className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" type="text" placeholder="Acme Corp" value={fullName} onChange={e => setFullName(e.target.value)} />
+          </Field>
+          
+          <div className="flex justify-end pt-2">
+            <button 
+              onClick={create} 
+              disabled={creating || !email.includes('@') || password.length < 8}
+              className="btn-primary bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 px-8"
+            >
+              {creating ? 'Provisioning…' : 'Create Client Account'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 space-y-4">
+          <div className="w-10 h-10 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin" />
+        </div>
+      ) : (
+        <div className="border border-slate-100 rounded-2xl overflow-hidden bg-white shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-              <tr>
-                <th className="px-4 py-2">Email</th>
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2 text-center">Jobs</th>
-                <th className="px-4 py-2 text-center">Active</th>
-                <th className="px-4 py-2">Joined</th>
-                <th className="px-4 py-2"></th>
+            <thead>
+              <tr className="bg-slate-50/50 text-left border-b border-slate-100">
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Client / Subscriber</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Database</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Jobs (Active)</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Registration</th>
+                <th className="px-6 py-4"></th>
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {users.map(u => (
-                <tr key={u.id}>
-                  <td className="px-4 py-2">
-                    {u.email}
-                    {u.is_admin && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">admin</span>}
+            <tbody className="divide-y divide-slate-50">
+              {clients.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">No clients provisioned yet.</td>
+                </tr>
+              ) : clients.map(u => (
+                <tr key={u.id} className="group hover:bg-slate-50/30 transition-all">
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-900 text-sm tracking-tight">{u.email}</span>
+                      <span className="text-xs font-medium text-slate-400 mt-0.5">{u.full_name || '—'}</span>
+                    </div>
                   </td>
-                  <td className="px-4 py-2 text-gray-600">{u.full_name || '—'}</td>
-                  <td className="px-4 py-2 text-center">{u.jobs_total}</td>
-                  <td className="px-4 py-2 text-center">{u.jobs_active > 0 && <span className="text-blue-600 font-medium">{u.jobs_active}</span>}</td>
-                  <td className="px-4 py-2 text-gray-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => remove(u.id, u.email)}
-                      className="text-xs text-red-600 hover:text-red-800">delete</button>
+                  <td className="px-6 py-4 text-center">
+                    {u.db_connected ? (
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Connected</span>
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-400 rounded-full border border-slate-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Pending</span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="font-bold text-slate-700">{u.jobs_total}</span>
+                      {u.jobs_active > 0 && (
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded animate-pulse">
+                          {u.jobs_active} active
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-600 uppercase tracking-tight">
+                        {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                      <span className="text-[9px] font-medium text-slate-400 uppercase tracking-widest mt-0.5">Joined</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => remove(u.id, u.email)}
+                      className="text-xs font-bold text-slate-300 hover:text-rose-600 transition-colors uppercase tracking-tighter"
+                    >
+                      Revoke Access
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -110,11 +169,16 @@ export default function UsersTab() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
 
-      <style jsx>{`
-        .input { width:100%; border:1px solid #d1d5db; border-radius:6px; padding:8px 12px; font-size:14px; outline:none; }
-        .input:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.2); }
-      `}</style>
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-sm font-bold text-slate-700 tracking-tight">{label}</label>
+      {children}
+      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">{hint}</p>}
     </div>
   );
 }

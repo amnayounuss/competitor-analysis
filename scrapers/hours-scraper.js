@@ -1,14 +1,15 @@
 /**
- * hoursScraper.js
+ * hours-scraper.js
  *
- * Anoosh API gives us title/address/phone/reviews/placeId — but you said the
- * hours we need should be scraped from Google Maps.
+ * The target-fetcher gives us title/address/phone/reviews/placeId via the
+ * Google Business Profile API — but business hours come from the public
+ * Google Maps page.
  *
- * For each Anoosh branch that has a placeId, this opens Google Maps using
+ * For each target-brand branch that has a placeId, this opens
  *   https://www.google.com/maps/place/?q=place_id:PLACE_ID
  * extracts the business hours table, and writes them back into the branch record.
  *
- * Runs after anooshFetcher.js, before the competitor scraper.
+ * Runs after target-fetcher, before the competitor scraper.
  * Cached per branch — re-running skips branches whose hours are already filled.
  */
 
@@ -96,15 +97,16 @@ async function scrapeHoursForBranch(page, branch) {
   }
 }
 
-async function scrapeHoursForAnoosh(anooshBranches) {
+async function scrapeHoursForTarget(targetBranches) {
+  const brand = config.targetName || "target";
   // Nothing to do if every branch already has hours
-  const needs = anooshBranches.filter((b) => !b.hours);
+  const needs = targetBranches.filter((b) => !b.hours);
   if (needs.length === 0) {
-    console.log("[hours] all Anoosh branches already have hours — skipping");
-    return anooshBranches;
+    console.log(`[hours] all ${brand} branches already have hours — skipping`);
+    return targetBranches;
   }
 
-  console.log(`\n═══ ANOOSH HOURS: scraping ${needs.length} branches from Google Maps ═══\n`);
+  console.log(`\n═══ ${brand.toUpperCase()} HOURS: scraping ${needs.length} branches from Google Maps ═══\n`);
 
   const browser = await puppeteer.launch({
     headless: config.PUPPETEER_OPTIONS.headless,
@@ -118,18 +120,18 @@ async function scrapeHoursForAnoosh(anooshBranches) {
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     );
 
-    for (let i = 0; i < anooshBranches.length; i++) {
-      const b = anooshBranches[i];
+    for (let i = 0; i < targetBranches.length; i++) {
+      const b = targetBranches[i];
       if (b.hours) continue; // already cached
 
       const short = (b.title || "").slice(0, 40);
-      process.stdout.write(`  [${i + 1}/${anooshBranches.length}] ${short} ... `);
+      process.stdout.write(`  [${i + 1}/${targetBranches.length}] ${short} ... `);
 
       b.hours = await scrapeHoursForBranch(page, b);
       console.log(b.hours ? "✓" : "(not found)");
 
       // Write progress to disk after every branch → crash-safe
-      fs.writeFileSync(config.ANOOSH_CACHE, JSON.stringify(anooshBranches, null, 2));
+      fs.writeFileSync(config.TARGET_CACHE, JSON.stringify(targetBranches, null, 2));
 
       await sleep(config.PUPPETEER_OPTIONS.betweenBranchesMs);
     }
@@ -137,9 +139,9 @@ async function scrapeHoursForAnoosh(anooshBranches) {
     await browser.close();
   }
 
-  const filled = anooshBranches.filter((b) => b.hours).length;
-  console.log(`\n[hours] done — ${filled}/${anooshBranches.length} Anoosh branches now have hours\n`);
-  return anooshBranches;
+  const filled = targetBranches.filter((b) => b.hours).length;
+  console.log(`\n[hours] done — ${filled}/${targetBranches.length} ${brand} branches now have hours\n`);
+  return targetBranches;
 }
 
-module.exports = { scrapeHoursForAnoosh };
+module.exports = { scrapeHoursForTarget };

@@ -21,14 +21,25 @@ function subMonths(date, months) {
 }
 
 /**
- * Classify a place into one of the three brands based on title.
- * Case-insensitive substring match; falls back to "Bostani" per spec.
+ * Classify a place into one of the brands declared on the job.
+ *
+ * Priority:
+ *   1. If the scraper tagged it (place.__searchBrand), trust that.
+ *   2. Otherwise substring-match the title against config.BRAND_KEYWORDS.
+ *   3. If nothing matches, return "Other" so the place is still kept but
+ *      grouped separately instead of being silently mis-attributed.
  */
-function assignBrand(title) {
-  const t = (title || "").toLowerCase();
-  if (t.includes("anoosh")) return "Anoosh";
-  if (t.includes("patchi")) return "Patchi";
-  return "Bostani";
+function assignBrand(place) {
+  if (place && typeof place === "object" && place.__searchBrand) {
+    return place.__searchBrand;
+  }
+  const title = (typeof place === "string" ? place : place && place.title) || "";
+  const t = title.toLowerCase();
+  const keywords = Array.isArray(config.BRAND_KEYWORDS) ? config.BRAND_KEYWORDS : [];
+  for (const { keyword, brand } of keywords) {
+    if (keyword && t.includes(keyword)) return brand;
+  }
+  return "Other";
 }
 
 /**
@@ -59,31 +70,34 @@ function parseReviewDate(review) {
 }
 
 /**
- * Given one place record, compute its last-N-months metrics.
+ * Given one place record, compute its window metrics.
+ *
+ * Window is [cutoffDate, endDate]. Review buckets divide the window into
+ * three equal thirds (e.g. for a 90-day window → 30-day buckets).
  */
-function computeBranchMetrics(place, cutoffDate) {
+function computeBranchMetrics(place, cutoffDate, endDate) {
   const reviews = Array.isArray(place.reviews) ? place.reviews : [];
-  const now = new Date();
+  const now = endDate || new Date();
 
-  // Bucket each recent review into "Month 1" (most recent 30 days),
-  // "Month 2" (30-60 days ago), "Month 3" (60-90 days ago).
-  // Month 1 is the most recent, Month 3 is the oldest in window.
-  const monthBuckets = [[], [], []]; // index 0 → Month 1 (newest), 2 → Month 3
+  const windowMs = Math.max(now.getTime() - cutoffDate.getTime(), 1);
+  const thirdMs  = windowMs / 3;
+  // Month 1 = newest third (closest to `now`), Month 3 = oldest third.
+  const monthBuckets = [[], [], []];
 
   const recent = [];
-  const recentWithDate = []; // reviews paired with parsed Date — used for per-review export
+  const recentWithDate = [];
   for (const r of reviews) {
     const d = parseReviewDate(r);
     if (!d) continue;
-    if (d < cutoffDate) continue;
+    if (d < cutoffDate || d > now) continue;
 
     recent.push(r);
     recentWithDate.push({ review: r, date: d });
 
-    const daysAgo = (now - d) / (1000 * 60 * 60 * 24);
-    if      (daysAgo <= 30) monthBuckets[0].push(r);
-    else if (daysAgo <= 60) monthBuckets[1].push(r);
-    else                    monthBuckets[2].push(r);
+    const offsetMs = now.getTime() - d.getTime();
+    if      (offsetMs <= thirdMs)     monthBuckets[0].push(r);
+    else if (offsetMs <= 2 * thirdMs) monthBuckets[1].push(r);
+    else                              monthBuckets[2].push(r);
   }
 
   // Overall stars + avg across the whole window
@@ -117,17 +131,21 @@ function computeBranchMetrics(place, cutoffDate) {
   // Build flat per-review export (for "All Reviews" sheet)
   const reviewsExport = recentWithDate
     .sort((a, b) => b.date - a.date) // newest first
-    .map(({ review, date }) => ({
-      date:        date.toISOString().slice(0, 10), // YYYY-MM-DD
-      monthBucket: ((now - date) / (1000 * 60 * 60 * 24) <= 30) ? "Month 1 (0-30 days)"
-                 : ((now - date) / (1000 * 60 * 60 * 24) <= 60) ? "Month 2 (30-60 days)"
-                 : "Month 3 (60-90 days)",
-      rating:      Number(review.stars ?? review.rating) || null,
-      text:        (review.text || review.textTranslated || "").trim(),
-    }));
+    .map(({ review, date }) => {
+      const offset = now.getTime() - date.getTime();
+      const bucket = offset <= thirdMs       ? "Month 1 (newest third)"
+                  : offset <= 2 * thirdMs    ? "Month 2 (middle third)"
+                  :                            "Month 3 (oldest third)";
+      return {
+        date:        date.toISOString().slice(0, 10),
+        monthBucket: bucket,
+        rating:      Number(review.stars ?? review.rating) || null,
+        text:        (review.text || review.textTranslated || "").trim(),
+      };
+    });
 
   return {
-    brand:            assignBrand(place.title),
+    brand:            assignBrand(place),
     branchName:       place.title || "Unknown",
     city:             extractCity(place),
     address:          place.address || "",
@@ -199,21 +217,25 @@ function computeBrandSummary(branchRows) {
 
 /**
  * Main entry point.
+ *
+ * Honors config.DATE_START / config.DATE_END when present, otherwise
+ * falls back to LOOKBACK_MONTHS from "now".
  */
 function analyze(rawPlaces) {
-  const now = new Date();
-  const cutoff = subMonths(now, config.LOOKBACK_MONTHS);
+  const endDate   = config.DATE_END   ? new Date(config.DATE_END + 'T23:59:59.999Z') : new Date();
+  const cutoff    = config.DATE_START ? new Date(config.DATE_START + 'T00:00:00.000Z')
+                                      : subMonths(endDate, config.LOOKBACK_MONTHS);
 
-  const branchRows = (rawPlaces || []).map((p) => computeBranchMetrics(p, cutoff));
+  const branchRows = (rawPlaces || []).map((p) => computeBranchMetrics(p, cutoff, endDate));
   const brandRows  = computeBrandSummary(branchRows);
 
-  // Rankings (bonus)
   const ranked = [...branchRows]
     .filter((r) => r.totalReviews3m > 0 && r.avgRating3m !== null)
     .sort((a, b) => b.avgRating3m - a.avgRating3m || b.totalReviews3m - a.totalReviews3m);
 
   return {
     cutoffDate:  cutoff,
+    endDate,
     branchRows,
     brandRows,
     bestBranch:  ranked[0] || null,
