@@ -331,6 +331,9 @@ async function scrapePopularTimes(allBranches, cacheFilePath) {
       const b = allBranches[i];
       if (b.popularTimes && b.popularTimes.available !== undefined) continue;
 
+      // Check cancellation between branches
+      await config.__check();
+
       const short = (b.title || "").slice(0, 40);
       process.stdout.write(`  [${i + 1}/${allBranches.length}] ${short} ... `);
 
@@ -386,7 +389,7 @@ async function scrapePopularTimes(allBranches, cacheFilePath) {
       await sleep(config.PUPPETEER_OPTIONS.betweenBranchesMs);
     }
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch {}
   }
 
   console.log(`\n[popular-times] done. fast: ${stats.fast}, slow: ${stats.slow}, failed: ${stats.failed}\n`);

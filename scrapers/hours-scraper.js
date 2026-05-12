@@ -124,6 +124,9 @@ async function scrapeHoursForTarget(targetBranches) {
       const b = targetBranches[i];
       if (b.hours) continue; // already cached
 
+      // Check cancellation between branches
+      await config.__check();
+
       const short = (b.title || "").slice(0, 40);
       process.stdout.write(`  [${i + 1}/${targetBranches.length}] ${short} ... `);
 

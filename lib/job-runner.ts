@@ -93,38 +93,43 @@ export async function runJob(job: Job): Promise<void> {
     let apiPathWorked = false;
     try {
       target = await fetchTarget(cfg, checkCancellation);
-      fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+      if (target.length > 0) {
+        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+      }
       apiPathWorked = target.length > 0;
       await log('info', `Stage A — ${target.length} target branches (API)`);
     } catch (err: any) {
-      await log('warn', `Stage A API failed: ${err.message}`);
+      await log('warn', `Stage A API failed: ${err.message} — will try Puppeteer fallback`);
     }
 
     // ── Stage A2 — Puppeteer fallback for target when API gave nothing ──
-    // Either the refresh token is missing/expired, OR the client doesn't own
-    // this brand on Google Business. Either way, fall back to scraping the
-    // target from public Google Maps using its name (same path as competitors).
     if (target.length === 0) {
+      await checkCancellation();
       await setProgress(18, 'Stage A2: target via public Google Maps');
       try {
         target = await scrapeBrand(cfg.TARGET_SEARCH, cfg, checkCancellation);
-        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+        if (target.length > 0) {
+          fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+        }
         await log('info', `Stage A2 — ${target.length} target branches (Puppeteer fallback)`);
       } catch (err: any) {
-        await log('error', `Stage A2 fallback also failed: ${err.message}`);
+        await log('warn', `Stage A2 fallback also failed: ${err.message} — continuing without target data`);
       }
     }
 
     // ── Stage B — target hours (only meaningful when API path was used) ──
-    await setProgress(25, 'Stage B: target hours');
-    if (apiPathWorked && target.length > 0) {
-      try {
-        target = await scrapeHoursForTarget(target, cfg, checkCancellation);
-        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
-        await log('info', `Stage B — hours scraped`);
-      } catch (err: any) { await log('warn', `Stage B failed: ${err.message}`); }
-    } else if (target.length > 0) {
-      await log('info', 'Stage B skipped — Puppeteer fallback already collected hours');
+    if (target.length > 0) {
+      await checkCancellation();
+      await setProgress(25, 'Stage B: target hours');
+      if (apiPathWorked) {
+        try {
+          target = await scrapeHoursForTarget(target, cfg, checkCancellation);
+          fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+          await log('info', `Stage B — hours scraped for ${target.length} branches`);
+        } catch (err: any) { await log('warn', `Stage B hours failed: ${err.message} — continuing without hours`); }
+      } else {
+        await log('info', 'Stage B skipped — Puppeteer fallback already collected hours');
+      }
     }
 
     // ── Stage C — competitors ──
@@ -140,17 +145,22 @@ export async function runJob(job: Job): Promise<void> {
 
     let rawPlaces = [...target, ...competitors];
     if (rawPlaces.length === 0) {
-      throw new Error('No branches discovered for target or competitors. Check that the brand names are correct and Google Maps returns results for them.');
+      throw new Error(
+        `No branches discovered for "${job.target_name}" or competitors [${job.competitors.join(', ')}]` +
+        (job.search_location ? ` in "${job.search_location}"` : '') +
+        '. Check that the brand names are correct and Google Maps returns results for them.'
+      );
     }
     fs.writeFileSync(cfg.RAW_JSON_FILE, JSON.stringify(rawPlaces, null, 2));
     await log('info', `Merged: ${target.length} target + ${competitors.length} competitor = ${rawPlaces.length} branches`);
 
-    // ── Stage D — popular times ──
+    // ── Stage D — popular times (optional, non-fatal) ──
+    await checkCancellation();
     await setProgress(65, 'Stage D: popular times');
     try {
       rawPlaces = await scrapePopularTimes(rawPlaces, cfg, checkCancellation);
       fs.writeFileSync(cfg.RAW_JSON_FILE, JSON.stringify(rawPlaces, null, 2));
-    } catch (err: any) { await log('warn', `Stage D failed: ${err.message}`); }
+    } catch (err: any) { await log('warn', `Stage D failed: ${err.message} — popular times will show N/A`); }
 
     // ── Stage E — analyze + files ──
     await checkCancellation();

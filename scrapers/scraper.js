@@ -105,11 +105,20 @@ async function discoverBranchesForBrand(browser, brand) {
   const branches = await extractBranchesFromPage(page);
   await page.close();
 
-  const nameWords = brand.name.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  // Build keywords from brand name — filter out very short words (≤2 chars)
+  // and common location words that would cause false positives.
+  const LOCATION_NOISE = new Set([
+    "saudi", "arabia", "riyadh", "jeddah", "dubai", "uae", "kuwait",
+    "bahrain", "qatar", "oman", "egypt", "jordan", "lebanon", "india",
+    "pakistan", "london", "new", "york", "city", "state", "kingdom",
+  ]);
+  const nameWords = brand.name.toLowerCase().split(/\s+/)
+    .filter((w) => w.length > 2 && !LOCATION_NOISE.has(w));
+
   const filtered = branches
     .filter((b) => {
       const t = b.title.toLowerCase();
-      return nameWords.some((w) => t.includes(w));
+      return nameWords.length > 0 && nameWords.some((w) => t.includes(w));
     })
     .map((b) => ({ ...b, __searchBrand: brand.key }));
 
@@ -121,7 +130,7 @@ async function discoverBranchesForBrand(browser, brand) {
   // Fallback: strict filter returned 0 — common when Google Maps titles are
   // in Arabic or a different script. The search URL was already brand-specific,
   // so accept all discovered branches and tag them with this brand.
-  console.warn(`[stage1:${brand.key}] ${branches.length} raw → 0 strict match (keywords: ${nameWords.join(", ")}) — accepting all results as fallback`);
+  console.warn(`[stage1:${brand.key}] ${branches.length} raw → 0 strict match (keywords: ${nameWords.join(", ") || "(none after filtering)"}) — accepting ALL ${branches.length} results as fallback (titles may be in non-Latin script)`);
   return branches.map((b) => ({ ...b, __searchBrand: brand.key }));
 }
 
@@ -433,25 +442,48 @@ async function scrapeBranches(browser, branches) {
 // ─────────────── public entry point ───────────────
 
 async function scrapeCompetitors() {
-  const browser = await launchBrowser();
+  let browser;
+  try {
+    browser = await launchBrowser();
+  } catch (err) {
+    console.error(`[scraper] failed to launch browser: ${err.message}`);
+    return [];
+  }
   try {
     let branches;
     if (fs.existsSync(config.COMP_BRANCHES)) {
       console.log(`[scraper] stage 1 cache at ${config.COMP_BRANCHES} — reusing`);
-      branches = JSON.parse(fs.readFileSync(config.COMP_BRANCHES, "utf8"));
+      try {
+        branches = JSON.parse(fs.readFileSync(config.COMP_BRANCHES, "utf8"));
+      } catch {
+        console.warn("[scraper] corrupt stage 1 cache — re-discovering");
+        branches = await discoverBranches(browser);
+        fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
+      }
     } else {
       branches = await discoverBranches(browser);
       fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
     }
-    if (branches.length === 0) {
+    if (!branches || branches.length === 0) {
       console.warn("[scraper] no competitor branches discovered — continuing with empty list");
       return [];
     }
 
     const full = await scrapeBranches(browser, branches);
     return full;
+  } catch (err) {
+    console.error(`[scraper] competitor scraping failed: ${err.message}`);
+    // Return whatever we have cached, if anything
+    if (fs.existsSync(config.COMP_REVIEWS)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8"));
+        console.warn(`[scraper] returning ${cached.length} cached competitor branches from partial run`);
+        return cached;
+      } catch {}
+    }
+    return [];
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch {}
   }
 }
 
@@ -464,9 +496,16 @@ async function scrapeCompetitors() {
  */
 async function scrapeBrand(brand) {
   if (!brand || !brand.key || !brand.url) {
-    throw new Error("scrapeBrand: brand needs { key, name, url }");
+    console.error("scrapeBrand: brand needs { key, name, url } — got:", JSON.stringify(brand));
+    return [];
   }
-  const browser = await launchBrowser();
+  let browser;
+  try {
+    browser = await launchBrowser();
+  } catch (err) {
+    console.error(`[scrapeBrand:${brand.key}] failed to launch browser: ${err.message}`);
+    return [];
+  }
   try {
     const discovered = await discoverBranchesForBrand(browser, brand);
     // Dedupe by URL
@@ -477,12 +516,15 @@ async function scrapeBrand(brand) {
       if (!seen.has(k)) { seen.add(k); branches.push(b); }
     }
     if (branches.length === 0) {
-      console.warn(`[scrapeBrand:${brand.key}] no branches discovered`);
+      console.warn(`[scrapeBrand:${brand.key}] no branches discovered on Google Maps`);
       return [];
     }
     return await scrapeBranches(browser, branches);
+  } catch (err) {
+    console.error(`[scrapeBrand:${brand.key}] failed: ${err.message}`);
+    return [];
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch {}
   }
 }
 

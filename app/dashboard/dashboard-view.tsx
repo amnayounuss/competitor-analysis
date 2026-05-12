@@ -472,67 +472,121 @@ export default function DashboardView({ data }: DashboardProps) {
             </div>
           </Card>
 
-          {/* Star Distribution + Monthly Trend */}
+          {/* Star Distribution — Donut Charts */}
+          <Card>
+            <SectionHeader title="Star Distribution" sub="5★ to 1★ breakdown per brand — hover slices for details" />
+            <div className="mt-6 flex flex-wrap justify-center gap-8">
+              {brandSummaries.map(b => (
+                <div key={b.brand} className="flex flex-col items-center gap-2">
+                  <BrandBadge brand={b.brand} color={b.color} />
+                  <DonutChart stars={b.stars} color={b.color} size={150} />
+                  <span className="text-[10px] font-black text-slate-400">{b.stars.reduce((s, n) => s + n, 0).toLocaleString()} reviews</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Monthly Trend — Line Chart (Rating) + Bar Chart (Volume) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
-              <SectionHeader title="Star Distribution" sub="5★ to 1★ breakdown per brand" />
-              <div className="space-y-6 mt-6">
-                {brandSummaries.map(b => {
-                  const total = b.stars.reduce((s, n) => s + n, 0) || 1;
-                  return (
-                    <div key={b.brand}>
-                      <div className="flex justify-between items-center mb-2">
-                        <BrandBadge brand={b.brand} color={b.color} />
-                        <span className="text-[10px] font-black text-slate-400">{total.toLocaleString()} reviews</span>
-                      </div>
-                      <div className="h-6 w-full flex rounded-lg overflow-hidden border border-slate-100">
-                        <Seg n={b.stars[0]} t={total} c="#10B981" />
-                        <Seg n={b.stars[1]} t={total} c="#34D399" />
-                        <Seg n={b.stars[2]} t={total} c="#FBBF24" />
-                        <Seg n={b.stars[3]} t={total} c="#FB7185" />
-                        <Seg n={b.stars[4]} t={total} c="#F43F5E" />
-                      </div>
-                      <div className="grid grid-cols-5 mt-1 text-[9px] font-black text-slate-400">
-                        {b.stars.map((c, i) => (
-                          <span key={i} className={i === 0 ? 'text-left' : i === 4 ? 'text-right' : 'text-center'}>
-                            {5 - i}★ {c}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+              <SectionHeader title="Rating Trend" sub="Average rating across 3 sub-periods per brand" />
+              <div className="mt-4">
+                <MultiLineChart
+                  series={brandSummaries.map(b => ({
+                    label: b.brand,
+                    data: [...b.monthly].reverse().map(m => m.avg),
+                    color: b.color,
+                  }))}
+                  labels={['Period 3 (Oldest)', 'Period 2', 'Period 1 (Newest)']}
+                  yMin={Math.max(0, Math.min(...brandSummaries.flatMap(b => b.monthly.map(m => m.avg)).filter(Boolean) as number[]) - 0.5)}
+                  yMax={5}
+                  yLabel="Avg Rating"
+                />
+                <div className="flex flex-wrap justify-center gap-4 mt-3">
+                  {brandSummaries.map(b => (
+                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <span className="w-3 h-[3px] rounded-full" style={{ backgroundColor: b.color }} />
+                      {b.brand}
+                    </span>
+                  ))}
+                </div>
               </div>
             </Card>
 
             <Card>
-              <SectionHeader title="Monthly Trend" sub="Review volume & rating across 3 sub-periods (newest → oldest)" />
-              <div className="space-y-6 mt-6">
-                {brandSummaries.map(b => {
-                  const maxR = Math.max(1, ...b.monthly.map(m => m.reviews));
-                  return (
-                    <div key={b.brand}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <BrandBadge brand={b.brand} color={b.color} />
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {b.monthly.map((m, i) => (
-                          <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                            <div className="text-[9px] font-black text-slate-400 uppercase mb-1">Period {i + 1}</div>
-                            <div className="text-lg font-black text-slate-900 leading-none">{m.reviews}</div>
-                            <div className="text-[10px] font-bold text-slate-500 mt-0.5">{m.avg != null ? `${m.avg.toFixed(2)} ★` : '—'}</div>
-                            <div className="mt-2 h-1 bg-slate-200 rounded overflow-hidden">
-                              <div className="h-full" style={{ width: `${(m.reviews / maxR) * 100}%`, backgroundColor: b.color }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+              <SectionHeader title="Review Volume" sub="Number of reviews per sub-period" />
+              <div className="mt-4">
+                <GroupedBarChart
+                  groups={['Period 3 (Oldest)', 'Period 2', 'Period 1 (Newest)']}
+                  series={brandSummaries.map(b => ({
+                    label: b.brand,
+                    data: [...b.monthly].reverse().map(m => m.reviews),
+                    color: b.color,
+                  }))}
+                  yLabel="Reviews"
+                />
+                <div className="flex flex-wrap justify-center gap-4 mt-3">
+                  {brandSummaries.map(b => (
+                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                      {b.brand}
+                    </span>
+                  ))}
+                </div>
               </div>
             </Card>
           </div>
+
+          {/* Branch Rating Distribution — Scatter-like horizontal chart */}
+          <Card>
+            <SectionHeader title="Branch Rating Overview" sub="Every branch plotted by average rating — quickly spot outliers" />
+            <div className="mt-6">
+              {brandSummaries.map(bs => {
+                const brandBranches = analytics
+                  .filter(a => a.brand === bs.brand && a.avg_rating_period != null && a.total_reviews_period > 0)
+                  .sort((a, b) => (b.avg_rating_period ?? 0) - (a.avg_rating_period ?? 0));
+                if (brandBranches.length === 0) return null;
+                return (
+                  <div key={bs.brand} className="mb-6 last:mb-0">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BrandBadge brand={bs.brand} color={bs.color} />
+                      <span className="text-[10px] font-black text-slate-400">{brandBranches.length} branches</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {brandBranches.map(a => {
+                        const r = a.avg_rating_period ?? 0;
+                        const opacity = Math.max(0.3, Math.min(1, a.total_reviews_period / 20));
+                        const bgColor = r >= 4.5 ? '#10B981' : r >= 4 ? '#34D399' : r >= 3.5 ? '#FBBF24' : r >= 3 ? '#FB923C' : '#F43F5E';
+                        return (
+                          <div key={a.id}
+                               className="group relative px-2 py-1 rounded-lg text-[9px] font-black text-white cursor-help transition-transform hover:scale-110 hover:z-10"
+                               style={{ backgroundColor: bgColor, opacity }}
+                               title={`${a.branch_name}\n${r.toFixed(2)} ★ · ${a.total_reviews_period} reviews · ${a.city || ''}`}>
+                            {r.toFixed(1)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100">
+                <span className="text-[9px] font-black text-slate-400 uppercase">Rating Scale:</span>
+                {[
+                  { label: '4.5+', color: '#10B981' },
+                  { label: '4.0+', color: '#34D399' },
+                  { label: '3.5+', color: '#FBBF24' },
+                  { label: '3.0+', color: '#FB923C' },
+                  { label: '<3.0', color: '#F43F5E' },
+                ].map(s => (
+                  <span key={s.label} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
+                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />{s.label}
+                  </span>
+                ))}
+                <span className="text-[9px] text-slate-400 ml-2">· opacity = review volume</span>
+              </div>
+            </div>
+          </Card>
 
           {/* City-wise Performance */}
           <Card>
@@ -763,51 +817,88 @@ export default function DashboardView({ data }: DashboardProps) {
           TAB: RANKINGS
          ═══════════════════════════════════════════════════════ */}
       {activeTab === 'rankings' && (
-        <Card>
-          <SectionHeader title="Branch Rankings" sub={`All ${rankings.length} branches ranked by rating`} />
-          <div className="mt-6 overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <TH align="center">Rank</TH>
-                  <TH>Brand</TH>
-                  <TH>Branch</TH>
-                  <TH>City</TH>
-                  <TH>Address</TH>
-                  <TH align="right">Avg Rating</TH>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {rankings.map((a, i) => {
-                  const isTop = i < 10;
-                  const isBottom = i >= rankings.length - 10;
-                  return (
-                    <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${isTop ? 'bg-emerald-50/30' : isBottom ? 'bg-rose-50/30' : ''}`}>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-black ${
-                          isTop ? 'bg-emerald-100 text-emerald-700' : isBottom ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {i + 1}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
-                      </td>
-                      <td className="px-3 py-3 font-black text-slate-900">{a.branch_name}</td>
-                      <td className="px-3 py-3 text-slate-500 uppercase text-[11px] tracking-tight">{a.city || '—'}</td>
-                      <td className="px-3 py-3 text-[10px] text-slate-500 max-w-[250px] truncate" title={a.address || ''}>{a.address || '—'}</td>
-                      <td className="px-3 py-3 text-right">
-                        <span className={`font-black ${isTop ? 'text-emerald-600' : isBottom ? 'text-rose-600' : 'text-slate-900'}`}>
-                          {a.avg_rating_period?.toFixed(2)} ★
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <>
+          {/* Top & Bottom visual chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <SectionHeader title="Top 15 Branches" sub="Highest rated branches across all brands" />
+              <div className="mt-4 overflow-x-auto">
+                <RankingChart
+                  items={rankings.slice(0, 15).map(a => ({
+                    label: a.branch_name,
+                    value: a.avg_rating_period ?? 0,
+                    color: colorMap[a.brand] || '#94A3B8',
+                    sub: `${a.total_reviews_period}r`,
+                  }))}
+                  maxVal={5}
+                />
+              </div>
+            </Card>
+            <Card>
+              <SectionHeader title="Bottom 15 Branches" sub="Lowest rated — focus areas for improvement" />
+              <div className="mt-4 overflow-x-auto">
+                <RankingChart
+                  items={[...rankings].reverse().slice(0, 15).map(a => ({
+                    label: a.branch_name,
+                    value: a.avg_rating_period ?? 0,
+                    color: colorMap[a.brand] || '#94A3B8',
+                    sub: `${a.total_reviews_period}r`,
+                  }))}
+                  maxVal={5}
+                />
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          {/* Full Rankings Table */}
+          <Card>
+            <SectionHeader title="Full Branch Rankings" sub={`All ${rankings.length} branches ranked by rating`} />
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <TH align="center">Rank</TH>
+                    <TH>Brand</TH>
+                    <TH>Branch</TH>
+                    <TH>City</TH>
+                    <TH>Address</TH>
+                    <TH align="right">Avg Rating</TH>
+                    <TH align="right">Reviews</TH>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {rankings.map((a, i) => {
+                    const isTop = i < 10;
+                    const isBottom = i >= rankings.length - 10;
+                    return (
+                      <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${isTop ? 'bg-emerald-50/30' : isBottom ? 'bg-rose-50/30' : ''}`}>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-black ${
+                            isTop ? 'bg-emerald-100 text-emerald-700' : isBottom ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {i + 1}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
+                        </td>
+                        <td className="px-3 py-3 font-black text-slate-900">{a.branch_name}</td>
+                        <td className="px-3 py-3 text-slate-500 uppercase text-[11px] tracking-tight">{a.city || '—'}</td>
+                        <td className="px-3 py-3 text-[10px] text-slate-500 max-w-[250px] truncate" title={a.address || ''}>{a.address || '—'}</td>
+                        <td className="px-3 py-3 text-right">
+                          <span className={`font-black ${isTop ? 'text-emerald-600' : isBottom ? 'text-rose-600' : 'text-slate-900'}`}>
+                            {a.avg_rating_period?.toFixed(2)} ★
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right font-bold text-slate-600">{a.total_reviews_period}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       )}
 
       {/* ═══════════════════════════════════════════════════════
@@ -888,7 +979,82 @@ export default function DashboardView({ data }: DashboardProps) {
             </Card>
           )}
 
-          {/* Brand-wise Popular Times Comparison */}
+          {/* Average Hourly Busyness — Line Chart Overlay per Brand */}
+          {ptBranches.length > 0 && (
+            <Card>
+              <SectionHeader title="Average Hourly Busyness" sub="Averaged across all branches per brand — shows when each brand is busiest" />
+              <div className="mt-4">
+                <HourlyOverlayChart
+                  series={brandSummaries.map(bs => {
+                    const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
+                    if (brandPt.length === 0) return { label: bs.brand, data: Array(24).fill(null), color: bs.color };
+                    // Average across all days and all branches for this brand
+                    const avgHour = Array(24).fill(null) as (number | null)[];
+                    for (let h = 0; h < 24; h++) {
+                      let sum = 0, cnt = 0;
+                      for (const a of brandPt) {
+                        if (!a.popular_times_grid) continue;
+                        for (const day of DAYS) {
+                          const v = a.popular_times_grid[day]?.[h];
+                          if (v != null) { sum += v; cnt++; }
+                        }
+                      }
+                      avgHour[h] = cnt > 0 ? Math.round(sum / cnt) : null;
+                    }
+                    return { label: bs.brand, data: avgHour, color: bs.color };
+                  }).filter(s => s.data.some(v => v != null))}
+                />
+                <div className="flex flex-wrap justify-center gap-4 mt-3">
+                  {brandSummaries.map(b => (
+                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <span className="w-3 h-[3px] rounded-full" style={{ backgroundColor: b.color }} />
+                      {b.brand}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Peak Day Distribution — which days are busiest per brand */}
+          {ptBranches.length > 0 && (
+            <Card>
+              <SectionHeader title="Peak Day Distribution" sub="Which day of the week each brand peaks on" />
+              <div className="mt-4">
+                <GroupedBarChart
+                  groups={DAYS.map(d => DAY_LABELS[d])}
+                  series={brandSummaries.map(bs => {
+                    const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
+                    const dayCounts = DAYS.map(day => {
+                      let sum = 0, cnt = 0;
+                      for (const a of brandPt) {
+                        if (!a.popular_times_grid) continue;
+                        const hourly = a.popular_times_grid[day];
+                        if (Array.isArray(hourly)) {
+                          const peak = Math.max(...hourly.filter((v): v is number => v != null));
+                          if (peak > 0) { sum += peak; cnt++; }
+                        }
+                      }
+                      return cnt > 0 ? Math.round(sum / cnt) : 0;
+                    });
+                    return { label: bs.brand, data: dayCounts, color: bs.color };
+                  })}
+                  height={240}
+                  yLabel="Peak Busyness %"
+                />
+                <div className="flex flex-wrap justify-center gap-4 mt-3">
+                  {brandSummaries.map(b => (
+                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                      {b.brand}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Brand-wise Peak Summary */}
           {ptBranches.length > 0 && (
             <Card>
               <SectionHeader title="Peak Hours by Brand" sub="Average peak busyness comparison across brands" />
@@ -923,6 +1089,274 @@ export default function DashboardView({ data }: DashboardProps) {
       )}
 
     </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  SVG Chart Components (zero dependencies)
+// ═══════════════════════════════════════════════════════════
+
+/** Donut / Pie chart for star distribution */
+function DonutChart({ stars, color, size = 140 }: { stars: [number, number, number, number, number]; color: string; size?: number }) {
+  const total = stars.reduce((s, n) => s + n, 0) || 1;
+  const STAR_COLORS = ['#10B981', '#34D399', '#FBBF24', '#FB7185', '#F43F5E'];
+  const STAR_LABELS = ['5★', '4★', '3★', '2★', '1★'];
+  const cx = size / 2, cy = size / 2, r = size / 2 - 12, inner = r * 0.58;
+  let cumAngle = -Math.PI / 2;
+
+  const slices = stars.map((count, i) => {
+    const pct = count / total;
+    const startAngle = cumAngle;
+    cumAngle += pct * 2 * Math.PI;
+    const endAngle = cumAngle;
+    const large = pct > 0.5 ? 1 : 0;
+    if (pct === 0) return null;
+    const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+    const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
+    const ix1 = cx + inner * Math.cos(endAngle), iy1 = cy + inner * Math.sin(endAngle);
+    const ix2 = cx + inner * Math.cos(startAngle), iy2 = cy + inner * Math.sin(startAngle);
+    const d = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${ix1},${iy1} A${inner},${inner} 0 ${large} 0 ${ix2},${iy2} Z`;
+    return <path key={i} d={d} fill={STAR_COLORS[i]} className="transition-opacity hover:opacity-80 cursor-help">
+      <title>{STAR_LABELS[i]}: {count} ({(pct * 100).toFixed(1)}%)</title>
+    </path>;
+  });
+
+  const avg = stars.reduce((s, n, i) => s + n * (5 - i), 0) / total;
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {slices}
+        <text x={cx} y={cy - 4} textAnchor="middle" className="fill-slate-900 text-lg" style={{ fontSize: 22, fontWeight: 900 }}>
+          {avg.toFixed(1)}
+        </text>
+        <text x={cx} y={cy + 14} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          avg ★
+        </text>
+      </svg>
+      <div className="flex gap-2 mt-2 flex-wrap justify-center">
+        {stars.map((c, i) => c > 0 ? (
+          <span key={i} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
+            <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: STAR_COLORS[i] }} />
+            {STAR_LABELS[i]}
+          </span>
+        ) : null)}
+      </div>
+    </div>
+  );
+}
+
+/** Multi-line chart — e.g. monthly rating trend per brand */
+function MultiLineChart({
+  series,
+  labels,
+  height = 200,
+  yMin = 0,
+  yMax = 5,
+  yLabel,
+  showDots = true,
+  showArea = true,
+}: {
+  series: { label: string; data: (number | null)[]; color: string }[];
+  labels: string[];
+  height?: number;
+  yMin?: number;
+  yMax?: number;
+  yLabel?: string;
+  showDots?: boolean;
+  showArea?: boolean;
+}) {
+  const W = 600, H = height, pad = { t: 20, r: 20, b: 36, l: 44 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const xStep = labels.length > 1 ? cw / (labels.length - 1) : cw;
+  const toX = (i: number) => pad.l + i * xStep;
+  const toY = (v: number) => pad.t + ch - ((v - yMin) / (yMax - yMin || 1)) * ch;
+
+  const yTicks = 5;
+  const yLines = Array.from({ length: yTicks + 1 }, (_, i) => yMin + (i / yTicks) * (yMax - yMin));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: H }}>
+      {/* Grid */}
+      {yLines.map((v, i) => (
+        <g key={i}>
+          <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={i === 0 ? undefined : '4,4'} />
+          <text x={pad.l - 8} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 9, fontWeight: 700 }} className="fill-slate-400">{v.toFixed(1)}</text>
+        </g>
+      ))}
+      {/* X labels */}
+      {labels.map((l, i) => (
+        <text key={i} x={toX(i)} y={H - 8} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="fill-slate-400">{l}</text>
+      ))}
+      {/* Y label */}
+      {yLabel && (
+        <text x={12} y={pad.t + ch / 2} textAnchor="middle" transform={`rotate(-90,12,${pad.t + ch / 2})`} style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="fill-slate-400">{yLabel}</text>
+      )}
+      {/* Lines + areas */}
+      {series.map((s, si) => {
+        const points = s.data.map((v, i) => v != null ? { x: toX(i), y: toY(v), v } : null);
+        const validPts = points.filter(Boolean) as { x: number; y: number; v: number }[];
+        if (validPts.length < 2) return null;
+        const line = validPts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+        const areaPath = line + ` L${validPts[validPts.length - 1].x},${toY(yMin)} L${validPts[0].x},${toY(yMin)} Z`;
+        return (
+          <g key={si}>
+            {showArea && <path d={areaPath} fill={s.color} opacity={0.08} />}
+            <path d={line} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+            {showDots && validPts.map((p, i) => (
+              <g key={i}>
+                <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={s.color} strokeWidth={2.5} className="cursor-help">
+                  <title>{s.label}: {p.v.toFixed(2)}</title>
+                </circle>
+              </g>
+            ))}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Grouped vertical bar chart */
+function GroupedBarChart({
+  groups,
+  series,
+  height = 220,
+  yLabel,
+}: {
+  groups: string[];
+  series: { label: string; data: number[]; color: string }[];
+  height?: number;
+  yLabel?: string;
+}) {
+  const W = 600, H = height, pad = { t: 16, r: 16, b: 44, l: 48 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const maxVal = Math.max(1, ...series.flatMap(s => s.data));
+  const groupW = cw / groups.length;
+  const barW = Math.min(24, (groupW - 12) / series.length);
+  const toY = (v: number) => pad.t + ch - (v / maxVal) * ch;
+
+  const yTicks = 4;
+  const yLines = Array.from({ length: yTicks + 1 }, (_, i) => Math.round((i / yTicks) * maxVal));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: H }}>
+      {yLines.map((v, i) => (
+        <g key={i}>
+          <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={i === 0 ? undefined : '4,4'} />
+          <text x={pad.l - 8} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 9, fontWeight: 700 }} className="fill-slate-400">{v}</text>
+        </g>
+      ))}
+      {yLabel && (
+        <text x={12} y={pad.t + ch / 2} textAnchor="middle" transform={`rotate(-90,12,${pad.t + ch / 2})`} style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="fill-slate-400">{yLabel}</text>
+      )}
+      {groups.map((g, gi) => {
+        const gx = pad.l + gi * groupW + groupW / 2;
+        const totalW = barW * series.length;
+        return (
+          <g key={gi}>
+            <text x={gx} y={H - 8} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }} className="fill-slate-400">{g}</text>
+            {series.map((s, si) => {
+              const val = s.data[gi] ?? 0;
+              const bx = gx - totalW / 2 + si * barW;
+              const by = toY(val);
+              const bh = toY(0) - by;
+              return (
+                <g key={si}>
+                  <rect x={bx} y={by} width={barW - 2} height={Math.max(0, bh)} rx={3} fill={s.color} className="transition-opacity hover:opacity-70 cursor-help">
+                    <title>{s.label}: {val}</title>
+                  </rect>
+                  {val > 0 && bh > 14 && (
+                    <text x={bx + (barW - 2) / 2} y={by + 12} textAnchor="middle" style={{ fontSize: 8, fontWeight: 800 }} fill="white">{val}</text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Horizontal lollipop chart for rankings */
+function RankingChart({ items, maxVal }: {
+  items: { label: string; value: number; color: string; sub?: string }[];
+  maxVal: number;
+}) {
+  const barH = 28, gap = 6, padL = 180, padR = 60;
+  const totalH = items.length * (barH + gap) + 8;
+  const barW = 400;
+  const W = padL + barW + padR;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full" style={{ maxHeight: Math.min(totalH, 600) }}>
+      {items.map((item, i) => {
+        const y = i * (barH + gap) + 4;
+        const w = maxVal > 0 ? (item.value / maxVal) * barW : 0;
+        return (
+          <g key={i}>
+            <text x={padL - 8} y={y + barH / 2 + 3} textAnchor="end" style={{ fontSize: 10, fontWeight: 800 }} className="fill-slate-700">
+              {item.label.length > 22 ? item.label.slice(0, 22) + '…' : item.label}
+            </text>
+            <rect x={padL} y={y + 4} width={Math.max(0, w)} height={barH - 8} rx={6} fill={item.color} opacity={0.85} className="transition-all duration-500" />
+            <text x={padL + w + 8} y={y + barH / 2 + 3} style={{ fontSize: 10, fontWeight: 900 }} className="fill-slate-900">
+              {item.value.toFixed(2)} ★
+            </text>
+            {item.sub && (
+              <text x={padL + w + 52} y={y + barH / 2 + 3} style={{ fontSize: 8, fontWeight: 700 }} className="fill-slate-400">
+                {item.sub}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Stacked area chart for hourly popular times — overlays multiple brands */
+function HourlyOverlayChart({
+  series,
+  height = 220,
+}: {
+  series: { label: string; data: (number | null)[]; color: string }[];
+  height?: number;
+}) {
+  const W = 600, H = height, pad = { t: 16, r: 16, b: 36, l: 40 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const xStep = cw / 23;
+  const toX = (h: number) => pad.l + h * xStep;
+  const toY = (v: number) => pad.t + ch - (v / 100) * ch;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: H }}>
+      {/* Y grid */}
+      {[0, 25, 50, 75, 100].map(v => (
+        <g key={v}>
+          <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={v === 0 ? undefined : '4,4'} />
+          <text x={pad.l - 6} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 8, fontWeight: 700 }} className="fill-slate-400">{v}%</text>
+        </g>
+      ))}
+      {/* X labels */}
+      {[0, 3, 6, 9, 12, 15, 18, 21].map(h => (
+        <text key={h} x={toX(h)} y={H - 8} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800 }} className="fill-slate-400">{hourLabel(h)}</text>
+      ))}
+      {/* Lines */}
+      {series.map((s, si) => {
+        const pts = s.data.map((v, h) => v != null ? { x: toX(h), y: toY(v) } : null).filter(Boolean) as { x: number; y: number }[];
+        if (pts.length < 2) return null;
+        const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+        const area = line + ` L${pts[pts.length - 1].x},${toY(0)} L${pts[0].x},${toY(0)} Z`;
+        return (
+          <g key={si}>
+            <path d={area} fill={s.color} opacity={0.06} />
+            <path d={line} fill="none" stroke={s.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 

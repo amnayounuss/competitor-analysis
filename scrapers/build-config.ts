@@ -70,22 +70,39 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
   const buildQuery = (brand: string) =>
     location ? `${brand} ${location}` : brand;
 
+  // Strip location words from brand/competitor names if the user accidentally
+  // included them (e.g. "Bostani Saudi Arabia" when search_location is already
+  // set to "Saudi Arabia").  This prevents the brand key/name from containing
+  // location noise that would break brand matching and produce ugly labels.
+  const stripLocation = (name: string): string => {
+    if (!location) return name;
+    const locWords = location.toLowerCase().split(/\s+/).filter(Boolean);
+    const words = name.split(/\s+/);
+    const cleaned = words.filter(w => !locWords.includes(w.toLowerCase()));
+    return cleaned.length > 0 ? cleaned.join(' ') : name; // keep original if everything got stripped
+  };
+
   // The scrapers use GMB OAuth (admin's Business Profile API project), not Gmail.
   if (!settings.gmb_oauth_client_id || !settings.gmb_oauth_client_secret) {
     throw new Error('GMB OAuth not configured. Admin must set GMB client_id and secret in /admin.');
   }
 
+  // Clean brand names: strip location words if user accidentally included them
+  // e.g. "Bostani Saudi Arabia" with location "Saudi Arabia" → "Bostani"
+  const cleanTarget = stripLocation(args.targetName);
+  const cleanComps  = args.competitors.map(c => stripLocation(c));
+
   // Brand vocabulary used by analyzer to classify scraped places.
   // Target first (so it matches before competitors when titles overlap),
   // then competitors in submission order.
   const brandKeywords: BrandKeyword[] = [
-    { keyword: args.targetName.toLowerCase(), brand: args.targetName },
-    ...args.competitors.map(c => ({ keyword: c.toLowerCase(), brand: c })),
+    { keyword: cleanTarget.toLowerCase(), brand: cleanTarget },
+    ...cleanComps.map(c => ({ keyword: c.toLowerCase(), brand: c })),
   ];
 
   return {
     jobId: args.jobId,
-    targetName: args.targetName,
+    targetName: cleanTarget,
     workDir,
     BRAND_KEYWORDS: brandKeywords,
     TARGET_API: {
@@ -95,11 +112,11 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       readMask:     'name,title,storeCode,storefrontAddress,regularHours,phoneNumbers,websiteUri,metadata',
     },
     TARGET_SEARCH: {
-      key:  args.targetName,
-      name: args.targetName,
-      url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(args.targetName))}/?hl=en`,
+      key:  cleanTarget,
+      name: cleanTarget,
+      url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(cleanTarget))}/?hl=en`,
     },
-    COMPETITORS: args.competitors.map(name => ({
+    COMPETITORS: cleanComps.map(name => ({
       key:  name,
       name,
       url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(name))}/?hl=en`,
