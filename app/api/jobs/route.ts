@@ -2,12 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { serverClient, adminClient } from '@/lib/supabase';
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
 const CreateJob = z.object({
-  target_name:   z.string().trim().min(1),
-  competitors:   z.array(z.string().trim().min(1)).min(1),
-  refresh_token: z.string().trim().min(20),
-  email_to:      z.string().trim().email(),
-});
+  target_name:     z.string().trim().min(1),
+  competitors:     z.array(z.string().trim().min(1)).min(1),
+  refresh_token:   z.string().trim().min(20),
+  email_to:        z.string().trim().email(),
+  date_start:      isoDate.optional(),
+  date_end:        isoDate.optional(),
+  search_location: z.string().trim().max(100).optional(),
+}).refine(d => {
+  if (!d.date_start || !d.date_end) return true;
+  return d.date_start <= d.date_end;
+}, { message: 'date_start must be on or before date_end', path: ['date_start'] })
+  .refine(d => {
+    if (!d.date_end) return true;
+    return d.date_end <= new Date().toISOString().slice(0, 10);
+  }, { message: 'date_end cannot be in the future', path: ['date_end'] })
+  .refine(d => {
+    if (!d.date_start || !d.date_end) return true;
+    const s = new Date(d.date_start), e = new Date(d.date_end);
+    const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+    return months <= 12;
+  }, { message: 'maximum range is 12 months', path: ['date_start'] });
 
 export async function POST(req: NextRequest) {
   const sb = serverClient();

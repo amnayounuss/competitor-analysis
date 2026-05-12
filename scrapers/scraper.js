@@ -1,8 +1,9 @@
 /**
- * scraper.js — Puppeteer scraper for COMPETITORS only (Patchi, Bostani).
- * Anoosh uses the official API in anooshFetcher.js.
+ * scraper.js — Puppeteer scraper for COMPETITORS only.
+ * The target brand uses the official Google Business Profile API
+ * (see target-fetcher.js).
  *
- * Stage 1: open each competitor's SA search URL, scroll, collect branch URLs
+ * Stage 1: open each competitor's search URL, scroll, collect branch URLs
  * Stage 2: for each branch: get address, hours, and recent reviews
  */
 
@@ -58,6 +59,7 @@ async function scrollAllResults(page) {
     process.stdout.write(`\r    scrolled ${i + 1}/${maxScrolls}  —  ${count} branches loaded   `);
     if (done) { process.stdout.write("\n    reached end of list\n"); break; }
     await sleep(config.PUPPETEER_OPTIONS.scrollPauseMs);
+    await config.__check();
   }
   process.stdout.write("\n");
 }
@@ -160,6 +162,53 @@ async function extractBranchDetails(page) {
       address = aria.replace(/^Address:\s*/i, "").trim();
     }
 
+    // Place-level rating + review count.
+    // Google Maps renders these in a few different layouts depending on the
+    // place type. We probe several selectors and take the first usable hit.
+    let rating = null;
+    let reviewsCount = null;
+
+    // 1) Try the standalone numeric rating span next to the stars row.
+    const ratingCandidates = [
+      'div.F7nice span[aria-hidden="true"]',
+      'div.fontDisplayLarge',
+      'div.gm2-display-2',
+    ];
+    for (const sel of ratingCandidates) {
+      const el = document.querySelector(sel);
+      const raw = el && (el.textContent || "").trim();
+      if (raw && /^\d+(\.\d+)?$/.test(raw)) {
+        const n = parseFloat(raw);
+        if (n >= 1 && n <= 5) { rating = n; break; }
+      }
+    }
+
+    // 2) Fallback: the aria-label on the stars role="img" element typically reads
+    //    "4.5 stars" or "4,5 stars" (locale-dependent commas).
+    if (rating === null) {
+      const star = document.querySelector('[role="img"][aria-label*="star" i]');
+      if (star) {
+        const txt = (star.getAttribute("aria-label") || "").replace(",", ".");
+        const m = txt.match(/(\d+(?:\.\d+)?)/);
+        if (m) {
+          const n = parseFloat(m[1]);
+          if (n >= 1 && n <= 5) rating = n;
+        }
+      }
+    }
+
+    // Review count — usually a button "1,234 reviews" or aria-label of same.
+    const countCandidates = Array.from(document.querySelectorAll('button, span'))
+      .map((el) => (el.getAttribute("aria-label") || el.textContent || "").trim())
+      .filter((t) => /\d[\d,]*\s*reviews?/i.test(t));
+    for (const t of countCandidates) {
+      const m = t.match(/([\d,]+)\s*reviews?/i);
+      if (m) {
+        const n = parseInt(m[1].replace(/,/g, ""), 10);
+        if (Number.isFinite(n)) { reviewsCount = n; break; }
+      }
+    }
+
     // Hours — button with data-item-id starting with "oh" (open hours)
     // or look for a table with role="rowgroup"
     let hours = "";
@@ -191,7 +240,7 @@ async function extractBranchDetails(page) {
       phone = aria.replace(/^Phone:\s*/i, "").trim();
     }
 
-    return { address, hours, phone };
+    return { address, hours, phone, rating, reviewsCount };
   });
 }
 
@@ -306,12 +355,14 @@ async function scrapeBranchFull(browser, branch, idx, total) {
     await page.close();
 
     return {
-      title:       branch.title,
-      address:     details.address,
-      addressLink: normalizedUrl,
-      hours:       details.hours,
-      phone:       details.phone,
-      url:         normalizedUrl,
+      title:        branch.title,
+      address:      details.address,
+      addressLink:  normalizedUrl,
+      hours:        details.hours,
+      phone:        details.phone,
+      url:          normalizedUrl,
+      rating:       details.rating,        // place-level overall rating (1-5, may be null)
+      reviewsCount: details.reviewsCount,  // Google's reported review count
       reviews,
       __searchBrand: branch.__searchBrand,
     };
@@ -327,31 +378,44 @@ async function scrapeBranchFull(browser, branch, idx, total) {
 }
 
 async function scrapeBranches(browser, branches) {
-  console.log(`\n═══ STAGE 2: Scraping competitor branches (${branches.length}) ═══\n`);
+  console.log(`\n═══ STAGE 2: Scraping ${branches.length} branches ═══\n`);
 
-  // Load existing progress if present → resume support
-  let results = [];
+  // Load existing progress if present → resume support (crash-safe across stages
+  // and across separate scrapeBrand / scrapeCompetitors invocations within
+  // one job).
+  let allCached = [];
   if (fs.existsSync(config.COMP_REVIEWS)) {
-    try { results = JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8")); } catch {}
+    try { allCached = JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8")); } catch {}
   }
-  const doneUrls = new Set(results.map((r) => r.url.split("?")[0]));
+  const cachedByUrl = new Map(allCached.map((r) => [r.url.split("?")[0], r]));
+  const requestedUrls = new Set(branches.map((b) => b.url.split("?")[0]));
 
   for (let i = 0; i < branches.length; i++) {
     const b = branches[i];
     const key = b.url.split("?")[0];
-    if (doneUrls.has(key)) {
+    if (cachedByUrl.has(key)) {
       console.log(`  [${i + 1}/${branches.length}] ${b.title.slice(0,40)} — cached, skip`);
       continue;
     }
 
     const full = await scrapeBranchFull(browser, b, i, branches.length);
-    results.push(full);
+    cachedByUrl.set(key, full);
 
     // Write after every branch — crash-safe
-    fs.writeFileSync(config.COMP_REVIEWS, JSON.stringify(results, null, 2));
+    fs.writeFileSync(
+      config.COMP_REVIEWS,
+      JSON.stringify(Array.from(cachedByUrl.values()), null, 2),
+    );
+    await config.__check();
     await sleep(config.PUPPETEER_OPTIONS.betweenBranchesMs);
   }
-  return results;
+
+  // Return ONLY the branches that were requested in this call.
+  // This keeps target-fallback and competitor calls from cross-contaminating
+  // each other's result sets even though they share the on-disk cache.
+  return Array.from(cachedByUrl.entries())
+    .filter(([k]) => requestedUrls.has(k))
+    .map(([, v]) => v);
 }
 
 // ─────────────── public entry point ───────────────
@@ -376,4 +440,35 @@ async function scrapeCompetitors() {
   }
 }
 
-module.exports = { scrapeCompetitors };
+/**
+ * Scrape a single brand (typically the target brand) from public Google Maps.
+ * Used by the job runner as a fallback when the Business Profile API path
+ * returns no data (no refresh token, expired token, or user doesn't own the
+ * brand on Google Business). `brand` is { key, name, url } — same shape as
+ * COMPETITORS entries. Results are tagged with `__searchBrand: brand.key`.
+ */
+async function scrapeBrand(brand) {
+  if (!brand || !brand.key || !brand.url) {
+    throw new Error("scrapeBrand: brand needs { key, name, url }");
+  }
+  const browser = await launchBrowser();
+  try {
+    const discovered = await discoverBranchesForBrand(browser, brand);
+    // Dedupe by URL
+    const seen = new Set();
+    const branches = [];
+    for (const b of discovered) {
+      const k = b.url.split("?")[0];
+      if (!seen.has(k)) { seen.add(k); branches.push(b); }
+    }
+    if (branches.length === 0) {
+      console.warn(`[scrapeBrand:${brand.key}] no branches discovered`);
+      return [];
+    }
+    return await scrapeBranches(browser, branches);
+  } finally {
+    await browser.close();
+  }
+}
+
+module.exports = { scrapeCompetitors, scrapeBrand };

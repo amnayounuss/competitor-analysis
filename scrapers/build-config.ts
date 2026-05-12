@@ -9,25 +9,38 @@ import { getSettings } from '../lib/settings';
 
 export interface CompetitorEntry { key: string; name: string; url: string; }
 
+export interface BrandKeyword { keyword: string; brand: string; }
+
 export interface JobConfig {
   jobId:           string;
   targetName:      string;
   workDir:         string;
-  ANOOSH_API: {
+  /** Lower-cased keywords → brand name. Used by analyzer to classify any
+   *  scraped place whose `__searchBrand` was not set. First match wins, so
+   *  order from most-specific to least-specific. */
+  BRAND_KEYWORDS:  BrandKeyword[];
+  TARGET_API: {
     clientId:     string;
     clientSecret: string;
     refreshToken: string;
     readMask:     string;
   };
+  /** Same shape as a competitor entry, but for the target brand. Used by the
+   *  Puppeteer fallback when the Business Profile API returns no data. */
+  TARGET_SEARCH:  CompetitorEntry;
   COMPETITORS: CompetitorEntry[];
   REVIEWS_OPTIONS: { maxReviews: number };
   LOOKBACK_MONTHS: number;
+  /** Inclusive YYYY-MM-DD start of analysis window. If absent, analyzer uses LOOKBACK_MONTHS. */
+  DATE_START?:     string;
+  /** Inclusive YYYY-MM-DD end of analysis window. If absent, analyzer uses today. */
+  DATE_END?:       string;
   PUPPETEER_OPTIONS: {
     headless: boolean; maxScrollsStage1: number; maxScrollsStage2: number;
     scrollPauseMs: number; betweenBranchesMs: number;
   };
   POPULAR_TIMES_OPTIONS: { enableHoverFallback: boolean };
-  ANOOSH_CACHE: string;
+  TARGET_CACHE: string;
   COMP_BRANCHES: string;
   COMP_REVIEWS: string;
   RAW_JSON_FILE: string;
@@ -40,38 +53,61 @@ export interface BuildConfigArgs {
   targetName:   string;
   competitors:  string[];
   refreshToken: string;
-  searchSuffix?: string;
+  /** Free-form location qualifier appended to every Google Maps search query
+   *  (e.g. "Riyadh", "Dubai UAE", "London"). Empty/undefined = no qualifier. */
+  searchLocation?: string;
+  dateStart?:   string;   // YYYY-MM-DD
+  dateEnd?:     string;   // YYYY-MM-DD
 }
 
-const WORKROOT = process.env.JOB_WORKDIR || '/tmp/anoosh-jobs';
+const WORKROOT = process.env.JOB_WORKDIR || '/tmp/scraper-jobs';
 
 export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> {
   const settings = await getSettings();
   const workDir  = path.join(WORKROOT, args.jobId);
-  const suffix   = args.searchSuffix || 'saudia';
+  const location = (args.searchLocation || '').trim();
+  // Builds "BrandName Location" or just "BrandName" if no location provided.
+  const buildQuery = (brand: string) =>
+    location ? `${brand} ${location}` : brand;
 
   // The scrapers use GMB OAuth (admin's Business Profile API project), not Gmail.
   if (!settings.gmb_oauth_client_id || !settings.gmb_oauth_client_secret) {
     throw new Error('GMB OAuth not configured. Admin must set GMB client_id and secret in /admin.');
   }
 
+  // Brand vocabulary used by analyzer to classify scraped places.
+  // Target first (so it matches before competitors when titles overlap),
+  // then competitors in submission order.
+  const brandKeywords: BrandKeyword[] = [
+    { keyword: args.targetName.toLowerCase(), brand: args.targetName },
+    ...args.competitors.map(c => ({ keyword: c.toLowerCase(), brand: c })),
+  ];
+
   return {
     jobId: args.jobId,
     targetName: args.targetName,
     workDir,
-    ANOOSH_API: {
+    BRAND_KEYWORDS: brandKeywords,
+    TARGET_API: {
       clientId:     settings.gmb_oauth_client_id,
       clientSecret: settings.gmb_oauth_client_secret,
       refreshToken: args.refreshToken,                   // client provides this
       readMask:     'name,title,storeCode,storefrontAddress,regularHours,phoneNumbers,websiteUri,metadata',
     },
+    TARGET_SEARCH: {
+      key:  args.targetName,
+      name: args.targetName,
+      url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(args.targetName))}/?hl=en`,
+    },
     COMPETITORS: args.competitors.map(name => ({
       key:  name,
       name,
-      url:  `https://www.google.com/maps/search/${encodeURIComponent(name + ' ' + suffix)}/?hl=en`,
+      url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(name))}/?hl=en`,
     })),
     REVIEWS_OPTIONS: { maxReviews: 100 },
     LOOKBACK_MONTHS: 3,
+    DATE_START:      args.dateStart,
+    DATE_END:        args.dateEnd,
     PUPPETEER_OPTIONS: {
       headless:           settings.puppeteer_headless,
       maxScrollsStage1:   50,
@@ -80,7 +116,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       betweenBranchesMs:  1500,
     },
     POPULAR_TIMES_OPTIONS: { enableHoverFallback: true },
-    ANOOSH_CACHE:   path.join(workDir, 'anoosh_locations.json'),
+    TARGET_CACHE:   path.join(workDir, 'target_locations.json'),
     COMP_BRANCHES:  path.join(workDir, 'competitor_branches.json'),
     COMP_REVIEWS:   path.join(workDir, 'competitor_reviews.json'),
     RAW_JSON_FILE:  path.join(workDir, 'raw_places.json'),

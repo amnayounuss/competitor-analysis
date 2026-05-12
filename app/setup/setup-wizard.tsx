@@ -17,7 +17,7 @@ export default function SetupWizard() {
 
   // Step 2 — Gmail (sender)
   const [gmailUser, setGmailUser] = useState('');
-  const [gmailFromName, setGmailFromName] = useState('Anoosh Analysis');
+  const [gmailFromName, setGmailFromName] = useState('Reviews Analytics');
   const [gmailClientId, setGmailClientId] = useState('');
   const [gmailClientSecret, setGmailClientSecret] = useState('');
   const [gmailRefreshToken, setGmailRefreshToken] = useState('');
@@ -77,148 +77,271 @@ export default function SetupWizard() {
   }
 
   return (
-    <div className="w-full max-w-xl bg-white border rounded-xl shadow-sm p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold">Welcome — first-time setup</h1>
-        <p className="text-sm text-gray-600 mt-1">One-time wizard. Manage everything from /admin afterwards.</p>
+    <div className="w-full max-w-2xl modern-card p-10 space-y-10 animate-in fade-in zoom-in-95 duration-500">
+      <header>
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100 mb-4">
+          Initial Provisioning
+        </div>
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome — Initial Setup</h1>
+        <p className="text-sm font-medium text-slate-500 mt-1">Configure your core systems and administrative identity.</p>
         <Stepper current={step} />
       </header>
 
-      {err && <div className="bg-red-50 text-red-700 text-sm rounded p-3 mb-4">{err}</div>}
-
-      {step === 1 && (
-        <Section title="Step 1 — Create admin account"
-          hint="Your owner account. You can add normal users later.">
-          <Field label="Full name (optional)">
-            <input type="text" value={adminName} onChange={e => setAdminName(e.target.value)}
-              className="input" placeholder="Your name" />
-          </Field>
-          <Field label="Admin email *">
-            <input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
-              className="input" placeholder="[email protected]" />
-          </Field>
-          <Field label="Admin password *" hint="At least 8 characters">
-            <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
-              className="input" minLength={8} />
-          </Field>
-        </Section>
+      {err && (
+        <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm font-medium rounded-xl p-4 flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+          {err}
+        </div>
       )}
 
-      {step === 2 && (
-        <Section title="Step 2 — Gmail OAuth (for sending email)"
-          hint="Use the Google Cloud project that owns the email-sending Gmail account.">
-          <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900 mb-2">
-            <p className="font-medium">Need a refresh token?</p>
-            <p className="mt-1">Go to <a className="underline" target="_blank" href="https://developers.google.com/oauthplayground">OAuth 2.0 Playground</a>, set your own credentials in the gear icon, authorize <code className="bg-white px-1">https://mail.google.com</code>, then exchange the auth code for a refresh token.</p>
-          </div>
-          <Field label="Gmail address *">
-            <input type="email" value={gmailUser} onChange={e => setGmailUser(e.target.value)}
-              className="input" placeholder="[email protected]" />
-          </Field>
-          <Field label="From display name">
-            <input type="text" value={gmailFromName} onChange={e => setGmailFromName(e.target.value)} className="input" />
-          </Field>
-          <Field label="OAuth Client ID *">
-            <input type="text" value={gmailClientId} onChange={e => setGmailClientId(e.target.value)}
-              className="input font-mono" placeholder="xxxxx.apps.googleusercontent.com" />
-          </Field>
-          <Field label="OAuth Client Secret *">
-            <input type="password" value={gmailClientSecret} onChange={e => setGmailClientSecret(e.target.value)}
-              className="input font-mono" placeholder="GOCSPX-..." />
-          </Field>
-          <Field label="Refresh Token *" hint="One-time token from OAuth Playground for the gmail address above">
-            <input type="password" value={gmailRefreshToken} onChange={e => setGmailRefreshToken(e.target.value)}
-              className="input font-mono" placeholder="1//0gK..." />
-          </Field>
-        </Section>
-      )}
+      <div className="min-h-[320px]">
+        {step === 1 && (
+          <Section title="Identity Management" hint="Define your primary administrative credentials.">
+            <Field label="Full Name (optional)">
+              <input type="text" value={adminName} onChange={e => setAdminName(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="John Doe" />
+            </Field>
+            <Field label="Root Email Address *">
+              <input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="[email protected]" />
+            </Field>
+            <Field label="Secure Password *" hint="Minimum 8 characters required">
+              <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" minLength={8} placeholder="••••••••" />
+            </Field>
+          </Section>
+        )}
 
-      {step === 3 && (
-        <Section title="Step 3 — GMB OAuth (for Business Profile API)"
-          hint="Different Google Cloud project — clients provide their own refresh tokens at job-submit time.">
-          <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-900 mb-2">
-            <p>The required scope is <code className="bg-white px-1">https://www.googleapis.com/auth/business.manage</code>. Each of your clients must generate a refresh token under THIS OAuth app and paste it into their job form.</p>
-          </div>
-          <Field label="GMB Client ID *">
-            <input type="text" value={gmbClientId} onChange={e => setGmbClientId(e.target.value)}
-              className="input font-mono" placeholder="xxxxx.apps.googleusercontent.com" />
-          </Field>
-          <Field label="GMB Client Secret *">
-            <input type="password" value={gmbClientSecret} onChange={e => setGmbClientSecret(e.target.value)}
-              className="input font-mono" placeholder="GOCSPX-..." />
-          </Field>
-        </Section>
-      )}
-
-      {step === 4 && (
-        <Section title="Step 4 — Preferences" hint="Change later from /admin.">
-          <label className="flex items-center gap-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
-            <input type="checkbox" checked={signupAllowed} onChange={e => setSignupAllowed(e.target.checked)} />
-            <div>
-              <div className="font-medium text-sm">Allow public signup</div>
-              <div className="text-xs text-gray-500">Off = only you create users from /admin.</div>
+        {step === 2 && (
+          <Section title="Communication Layer" hint="Configure Gmail OAuth for automated report delivery.">
+            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-[11px] text-indigo-900/80 leading-relaxed mb-6">
+              <p className="font-bold text-indigo-900 mb-1 flex items-center gap-2">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                OAUTH GUIDANCE
+              </p>
+              Use <a className="underline font-bold hover:text-indigo-600 transition-colors" target="_blank" href="https://developers.google.com/oauthplayground">OAuth Playground</a> to authorize <code className="bg-white/60 px-1 rounded">mail.google.com</code> and generate a persistent refresh token for this project.
             </div>
-          </label>
-        </Section>
-      )}
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Sender Email *">
+                <input type="email" value={gmailUser} onChange={e => setGmailUser(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="[email protected]" />
+              </Field>
+              <Field label="Display Name">
+                <input type="text" value={gmailFromName} onChange={e => setGmailFromName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
+              </Field>
+            </div>
+            
+            <Field label="OAuth Client ID *">
+              <input type="text" value={gmailClientId} onChange={e => setGmailClientId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="xxxxx.apps.googleusercontent.com" />
+            </Field>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Client Secret *">
+                <input type="password" value={gmailClientSecret} onChange={e => setGmailClientSecret(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="GOCSPX-..." />
+              </Field>
+              <Field label="Refresh Token *">
+                <input type="password" value={gmailRefreshToken} onChange={e => setGmailRefreshToken(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="1//0gK..." />
+              </Field>
+            </div>
+          </Section>
+        )}
 
-      {step === 5 && (
-        <Section title="Step 5 — Confirm">
-          <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm">
-            <p className="font-medium mb-2">Ready to finish</p>
-            <ul className="text-xs space-y-1">
-              <li>• <b>Admin:</b> <code className="bg-white px-1">{adminEmail}</code></li>
-              <li>• <b>Gmail sender:</b> <code className="bg-white px-1">{gmailUser}</code></li>
-              <li>• <b>Gmail OAuth:</b> <code className="bg-white px-1">{gmailClientId.slice(0, 30)}...</code></li>
-              <li>• <b>GMB OAuth:</b> <code className="bg-white px-1">{gmbClientId.slice(0, 30)}...</code></li>
-              <li>• <b>Public signup:</b> {signupAllowed ? 'enabled' : 'disabled'}</li>
-            </ul>
-          </div>
-        </Section>
-      )}
+        {step === 3 && (
+          <Section title="Intelligence Engine" hint="Configure Google Business Profile API for data extraction.">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-[11px] text-emerald-900/80 leading-relaxed mb-6 italic">
+              Required scope: <code className="bg-white/60 px-1 rounded font-bold">.../auth/business.manage</code>. This project acts as the orchestrator for client-provided tokens.
+            </div>
+            
+            <Field label="GMB Client ID *">
+              <input type="text" value={gmbClientId} onChange={e => setGmbClientId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="xxxxx.apps.googleusercontent.com" />
+            </Field>
+            <Field label="GMB Client Secret *">
+              <input type="password" value={gmbClientSecret} onChange={e => setGmbClientSecret(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="GOCSPX-..." />
+            </Field>
 
-      <div className="flex justify-between mt-8 pt-4 border-t">
-        <button onClick={back} disabled={step === 1 || submitting}
-          className="text-sm border rounded px-4 py-2 hover:bg-gray-50 disabled:opacity-40">Back</button>
-        {step < 5
-          ? <button onClick={next} disabled={!canProceed()}
-            className="text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded px-5 py-2 font-medium">
-            Continue
-          </button>
-          : <button onClick={finish} disabled={submitting}
-            className="text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded px-5 py-2 font-medium">
-            {submitting ? 'Setting up…' : 'Finish setup'}
-          </button>
-        }
+            <div className="mt-8 pt-8 border-t border-slate-100">
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">Client Project Schema</p>
+              <div className="bg-slate-900 rounded-2xl p-6 relative group overflow-hidden">
+                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`-- Run this in your Client Supabase SQL Editor
+create table public.branches (
+  id uuid primary key default gen_random_uuid(),
+  brand text not null,
+  branch_name text not null,
+  city text,
+  address text,
+  google_maps_link text,
+  phone text,
+  website text,
+  stars numeric(3,2) default 0,
+  reviews_count int default 0,
+  popular_times jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table public.reviews (
+  id bigserial primary key,
+  brand text not null,
+  branch_id uuid references public.branches(id) on delete cascade,
+  rating int check (rating between 1 and 5),
+  text text,
+  reviewer_name text,
+  published_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table public.analyses (
+  id uuid primary key default gen_random_uuid(),
+  brand text not null unique,
+  branch_count int default 0,
+  total_reviews_3m int default 0,
+  avg_rating_3m numeric(3,2) default 0,
+  star_5_count int default 0,
+  star_4_count int default 0,
+  star_3_count int default 0,
+  star_2_count int default 0,
+  star_1_count int default 0,
+  last_updated_at timestamptz not null default now()
+);
+
+create table public.job_history (
+  id uuid primary key default gen_random_uuid(),
+  branches_total int default 0,
+  reviews_total int default 0,
+  finished_at timestamptz not null default now()
+);`);
+                    }}
+                    className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all text-[10px] font-bold uppercase"
+                  >
+                    Copy SQL
+                  </button>
+                </div>
+                <pre className="text-[10px] text-indigo-300 font-mono leading-relaxed overflow-x-auto max-h-[150px]">
+{`-- CLIENT SUPABASE SCHEMA
+create table public.branches (
+  id uuid primary key default ...
+  ...
+  stars numeric(3,2) default 0,
+  reviews_count int default 0,
+);
+
+-- Click Copy for full query`}
+                </pre>
+              </div>
+              <p className="text-[10px] font-medium text-slate-500 mt-3 leading-relaxed">
+                Run the full SQL script in the **SQL Editor** of the project you connect to each client.
+              </p>
+            </div>
+          </Section>
+        )}
+
+        {step === 4 && (
+          <Section title="Environment Controls" hint="Configure platform-wide security defaults.">
+            <div 
+              onClick={() => setSignupAllowed(!signupAllowed)}
+              className={`group relative flex items-start gap-4 p-5 rounded-2xl border transition-all cursor-pointer select-none ${
+                signupAllowed 
+                  ? 'bg-indigo-50/50 border-indigo-200 ring-1 ring-indigo-200' 
+                  : 'bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <div className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${
+                signupAllowed ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'
+              }`}>
+                {signupAllowed && <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
+              </div>
+              <div>
+                <p className={`font-bold text-sm transition-colors ${signupAllowed ? 'text-indigo-900' : 'text-slate-700'}`}>Allow Public Registration</p>
+                <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed">
+                  When enabled, any visitor can create an account. Disable this to restrict access to manually provisioned users only.
+                </p>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {step === 5 && (
+          <Section title="Final Verification" hint="Review your configuration before committing.">
+            <div className="modern-card bg-slate-50/50 border-slate-100 p-6 space-y-4">
+              <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin Node</span>
+                <span className="text-sm font-bold text-slate-900">{adminEmail}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Comms Interface</span>
+                <span className="text-sm font-bold text-slate-900">{gmailUser}</span>
+              </div>
+              <div className="flex items-center justify-between py-2 border-b border-slate-100">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">GMB Engine</span>
+                <span className="text-sm font-bold text-slate-900 truncate max-w-[200px]">{gmbClientId}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Public Access</span>
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-tighter ${signupAllowed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                  {signupAllowed ? 'Permitted' : 'Restricted'}
+                </span>
+              </div>
+            </div>
+          </Section>
+        )}
       </div>
 
-      <style jsx>{`
-        .input {
-          width: 100%; border: 1px solid #d1d5db; border-radius: 6px;
-          padding: 8px 12px; font-size: 14px; outline: none;
-        }
-        .input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
-      `}</style>
+      <footer className="flex items-center justify-between pt-8 border-t border-slate-50">
+        <button 
+          onClick={back} 
+          disabled={step === 1 || submitting}
+          className="px-6 py-2.5 text-sm font-bold text-slate-400 hover:text-slate-900 disabled:opacity-0 transition-all uppercase tracking-widest"
+        >
+          Previous
+        </button>
+        
+        {step < 5 ? (
+          <button 
+            onClick={next} 
+            disabled={!canProceed()}
+            className="btn-primary px-10 shadow-xl shadow-indigo-600/20"
+          >
+            Continue
+          </button>
+        ) : (
+          <button 
+            onClick={finish} 
+            disabled={submitting}
+            className="btn-primary bg-emerald-600 hover:bg-emerald-700 px-10 shadow-xl shadow-emerald-600/20"
+          >
+            {submitting ? 'Finalizing Configuration…' : 'Initialize Platform'}
+          </button>
+        )}
+      </footer>
     </div>
   );
 }
 
 function Stepper({ current }: { current: number }) {
-  const labels = ['Admin', 'Gmail', 'GMB', 'Prefs', 'Done'];
+  const labels = ['Admin', 'Gmail', 'GMB', 'Prefs', 'Confirm'];
   return (
-    <div className="flex items-center gap-2 mt-4">
+    <div className="flex items-center gap-1.5 mt-8 w-full">
       {labels.map((label, i) => {
         const n = i + 1;
         const active = current === n;
         const done = current > n;
         return (
-          <div key={n} className="flex items-center gap-1.5 flex-1 min-w-0">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0
-              ${done ? 'bg-green-600 text-white' : active ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
-              {done ? '✓' : n}
+          <div key={n} className="flex items-center gap-2 flex-1 min-w-0 last:flex-none">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold transition-all duration-500 flex-shrink-0
+              ${done ? 'bg-emerald-500 text-white ring-4 ring-emerald-500/10' : active ? 'bg-indigo-600 text-white ring-4 ring-indigo-600/20' : 'bg-slate-100 text-slate-400'}`}>
+              {done ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
+              ) : n}
             </div>
-            <span className={`text-xs truncate ${active ? 'font-semibold' : 'text-gray-500'}`}>{label}</span>
-            {n < 5 && <div className="flex-1 h-px bg-gray-200" />}
+            {n < 5 && <div className={`flex-1 h-1 rounded-full transition-all duration-700 ${done ? 'bg-emerald-500' : 'bg-slate-100'}`} />}
           </div>
         );
       })}
@@ -228,22 +351,22 @@ function Stepper({ current }: { current: number }) {
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
       <div>
-        <h2 className="text-base font-semibold">{title}</h2>
-        {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+        <h2 className="text-xl font-bold text-slate-900 tracking-tight">{title}</h2>
+        {hint && <p className="text-sm font-medium text-slate-500 mt-1">{hint}</p>}
       </div>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-4">{children}</div>
     </div>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
+    <div className="space-y-1.5">
+      <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">{label}</label>
       {children}
-      {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-widest ml-1">{hint}</p>}
     </div>
   );
 }

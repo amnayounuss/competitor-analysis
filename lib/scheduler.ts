@@ -38,7 +38,10 @@ async function tick() {
   console.log(`[scheduler] ${due.length} schedule(s) due`);
 
   for (const s of due) {
-    // Insert a job row
+    // Calculate date range for the PREVIOUS month
+    // e.g. if today is May 1st, fetch April 1st to April 30th
+    const { start: date_start, end: date_end } = getPreviousMonthRange();
+
     const { data: created, error: insErr } = await sb.from('jobs').insert({
       user_id:       s.user_id,
       kind:          'scheduled',
@@ -47,6 +50,8 @@ async function tick() {
       competitors:   s.competitors,
       refresh_token: s.refresh_token,
       email_to:      s.email_to,
+      date_start,
+      date_end,
     }).select('id').single();
 
     if (insErr || !created) {
@@ -54,7 +59,6 @@ async function tick() {
       continue;
     }
 
-    // Advance next_run_at to the same day next month
     const next = computeNextRun(s.day_of_month);
     await sb.from('schedules').update({
       last_run_at: new Date().toISOString(),
@@ -62,8 +66,23 @@ async function tick() {
       next_run_at: next.toISOString(),
     }).eq('id', s.id);
 
-    console.log(`[scheduler] created job ${created.id} for schedule ${s.id}, next run ${next.toISOString()}`);
+    console.log(`[scheduler] created job ${created.id} for schedule ${s.id}, range ${date_start} to ${date_end}, next run ${next.toISOString()}`);
   }
+}
+
+function getPreviousMonthRange() {
+  const now = new Date();
+  // 1st of current month
+  const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Last day of previous month (day 0 of current month)
+  const lastOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  // 1st of previous month
+  const firstOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  return {
+    start: firstOfPrevMonth.toISOString().split('T')[0],
+    end:   lastOfPrevMonth.toISOString().split('T')[0]
+  };
 }
 
 function computeNextRun(dayOfMonth: number): Date {

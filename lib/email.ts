@@ -145,7 +145,7 @@ export async function sendTestEmail(to: string) {
   await tx.sendMail({
     from: `"${s.gmail_from_name}" <${s.gmail_user}>`,
     to,
-    subject: 'Test email — Anoosh Analysis',
+    subject: 'Test email — Reviews Analytics',
     html: '<p>If you can read this, your Gmail OAuth is working.</p>',
   });
 }

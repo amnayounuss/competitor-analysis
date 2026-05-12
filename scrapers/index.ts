@@ -18,7 +18,7 @@ import type { JobConfig } from './build-config';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const proxyConfig = require('./config');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const _anooshFetcher  = require('./anoosh-fetcher');
+const _targetFetcher  = require('./target-fetcher');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _hoursScraper   = require('./hours-scraper');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -32,8 +32,9 @@ const _excelBuilder   = require('./excel-builder');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _reportBuilder  = require('./report-builder');
 
-async function withConfig<T>(cfg: JobConfig, fn: () => Promise<T> | T): Promise<T> {
+async function withConfig<T>(cfg: JobConfig, cancelCheck: (() => Promise<void>) | null, fn: () => Promise<T> | T): Promise<T> {
   proxyConfig.__setActiveConfig(cfg);
+  if (cancelCheck) proxyConfig.__setCancelCheck(cancelCheck);
   try {
     return await fn();
   } finally {
@@ -42,23 +43,34 @@ async function withConfig<T>(cfg: JobConfig, fn: () => Promise<T> | T): Promise<
 }
 
 // ── Stage A ────────────────────────────────────────────────
-export async function fetchAnoosh(cfg: JobConfig): Promise<any[]> {
-  return withConfig(cfg, () => _anooshFetcher.fetchAnoosh());
+export async function fetchTarget(cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _targetFetcher.fetchTarget());
 }
 
 // ── Stage B ────────────────────────────────────────────────
-export async function scrapeHoursForAnoosh(branches: any[], cfg: JobConfig): Promise<any[]> {
-  return withConfig(cfg, () => _hoursScraper.scrapeHoursForAnoosh(branches));
+export async function scrapeHoursForTarget(branches: any[], cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _hoursScraper.scrapeHoursForTarget(branches));
 }
 
 // ── Stage C ────────────────────────────────────────────────
-export async function scrapeCompetitors(cfg: JobConfig): Promise<any[]> {
-  return withConfig(cfg, () => _scraper.scrapeCompetitors());
+export async function scrapeCompetitors(cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _scraper.scrapeCompetitors());
+}
+
+// ── Stage A2 (fallback) ───────────────────────────────────
+// Puppeteer-scrapes a single brand (target) from public Google Maps when
+// the Business Profile API path returns nothing.
+export async function scrapeBrand(
+  brand: { key: string; name: string; url: string },
+  cfg: JobConfig,
+  cancelCheck: (() => Promise<void>) | null = null,
+): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _scraper.scrapeBrand(brand));
 }
 
 // ── Stage D ────────────────────────────────────────────────
-export async function scrapePopularTimes(places: any[], cfg: JobConfig): Promise<any[]> {
-  return withConfig(cfg, () => _popularTimes.scrapePopularTimes(places, cfg.RAW_JSON_FILE));
+export async function scrapePopularTimes(places: any[], cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _popularTimes.scrapePopularTimes(places, cfg.RAW_JSON_FILE));
 }
 
 // ── Stage E ────────────────────────────────────────────────

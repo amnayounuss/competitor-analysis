@@ -21,6 +21,9 @@ export interface Job {
   report_url: string | null;
   branches_total: number | null;
   reviews_total: number | null;
+  date_start?: string | null;
+  date_end?: string | null;
+  search_location?: string | null;
 }
 
 export interface Schedule {

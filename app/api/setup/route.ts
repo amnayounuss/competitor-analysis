@@ -5,19 +5,19 @@ import { isSetupCompleted, clearSettingsCache } from '@/lib/settings';
 
 const SetupSchema = z.object({
   admin: z.object({
-    email:     z.string().email(),
-    password:  z.string().min(8),
+    email: z.string().email(),
+    password: z.string().min(8),
     full_name: z.string().min(1).optional(),
   }),
   gmail: z.object({
-    user:               z.string().email(),
-    from_name:          z.string().min(1).default('Reports'),
-    oauth_client_id:    z.string().min(10),
+    user: z.string().email(),
+    from_name: z.string().min(1).default('Reports'),
+    oauth_client_id: z.string().min(10),
     oauth_client_secret: z.string().min(10),
-    refresh_token:      z.string().min(20),
+    refresh_token: z.string().min(20),
   }),
   gmb: z.object({
-    oauth_client_id:    z.string().min(10),
+    oauth_client_id: z.string().min(10),
     oauth_client_secret: z.string().min(10),
   }),
   signup_allowed: z.boolean().default(true),
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     if (createErr.message.toLowerCase().includes('already been registered')) {
       const { data: listData, error: listErr } = await sb.auth.admin.listUsers();
       if (listErr) return NextResponse.json({ error: 'list users failed: ' + listErr.message }, { status: 500 });
-      
+
       const existing = listData.users.find(u => u.email?.toLowerCase() === admin.email.toLowerCase());
       if (!existing) return NextResponse.json({ error: 'User exists but not found in list' }, { status: 500 });
       userId = existing.id;
@@ -76,11 +76,11 @@ export async function POST(req: NextRequest) {
   // 2. Promote to admin in profiles
   const { error: profileErr } = await sb
     .from('profiles')
-    .upsert({ 
-      id: userId, 
-      email: admin.email, 
+    .upsert({
+      id: userId,
+      email: admin.email,
       is_admin: true,
-      full_name: admin.full_name || admin.email 
+      full_name: admin.full_name || admin.email
     }, { onConflict: 'id' });
 
   if (profileErr) {
@@ -91,17 +91,17 @@ export async function POST(req: NextRequest) {
     .from('app_settings')
     .upsert({
       id: 1,
-      gmail_user:                gmail.user,
-      gmail_from_name:           gmail.from_name,
-      gmail_oauth_client_id:     gmail.oauth_client_id,
+      gmail_user: gmail.user,
+      gmail_from_name: gmail.from_name,
+      gmail_oauth_client_id: gmail.oauth_client_id,
       gmail_oauth_client_secret: gmail.oauth_client_secret,
-      gmail_refresh_token:       gmail.refresh_token,
-      gmb_oauth_client_id:       gmb.oauth_client_id,
-      gmb_oauth_client_secret:   gmb.oauth_client_secret,
+      gmail_refresh_token: gmail.refresh_token,
+      gmb_oauth_client_id: gmb.oauth_client_id,
+      gmb_oauth_client_secret: gmb.oauth_client_secret,
       signup_allowed,
-      setup_completed:           true,
-      updated_at:                new Date().toISOString(),
-      updated_by:                userId,
+      setup_completed: true,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
     }, { onConflict: 'id' });
   if (settingsErr) {
     return NextResponse.json({ error: 'settings save failed: ' + settingsErr.message }, { status: 500 });

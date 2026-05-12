@@ -18,8 +18,8 @@ import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
 
 import {
-  fetchAnoosh, scrapeHoursForAnoosh, scrapeCompetitors,
-  scrapePopularTimes, analyze, writeWorkbook, writeReport,
+  fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
+  scrapeBrand, scrapePopularTimes, analyze, writeWorkbook, writeReport,
 } from '../scrapers';
 
 export async function runJob(job: Job): Promise<void> {
@@ -55,6 +55,13 @@ export async function runJob(job: Job): Promise<void> {
     void await sb.from('jobs').update({ progress_pct: pct, current_stage: stage }).eq('id', job.id);
 
   try {
+    const checkCancellation = async () => {
+      const { data: latest } = await sb.from('jobs').select('status').eq('id', job.id).single();
+      if (latest?.status === 'cancelled') {
+        throw new Error('STOPPED_BY_USER');
+      }
+    };
+
     await sb.from('jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', job.id);
     await notify({ userId: job.user_id, jobId: job.id, kind: 'job_started',
                    title: `Analysis started — ${job.target_name}` });
@@ -71,37 +78,61 @@ export async function runJob(job: Job): Promise<void> {
     // ── Build config + workdir ──
     const cfg = await buildJobConfig({
       jobId: job.id, targetName: job.target_name, competitors: job.competitors,
-      refreshToken: job.refresh_token,
+      refreshToken:   job.refresh_token,
+      searchLocation: job.search_location ?? undefined,
+      dateStart:      job.date_start ?? undefined,
+      dateEnd:        job.date_end   ?? undefined,
     });
     fs.mkdirSync(cfg.workDir, { recursive: true });
     await log('info', `Workdir: ${cfg.workDir}`);
 
-    // ── Stage A — target API ──
+    // ── Stage A — target via Google Business Profile API ──
+    await checkCancellation();
     await setProgress(10, 'Stage A: target API');
     let target: any[] = [];
+    let apiPathWorked = false;
     try {
-      target = await fetchAnoosh(cfg);
-      fs.writeFileSync(cfg.ANOOSH_CACHE, JSON.stringify(target, null, 2));
-      await log('info', `Stage A — ${target.length} target branches`);
+      target = await fetchTarget(cfg, checkCancellation);
+      fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+      apiPathWorked = target.length > 0;
+      await log('info', `Stage A — ${target.length} target branches (API)`);
     } catch (err: any) {
-      await log('warn', `Stage A failed: ${err.message}`);
+      await log('warn', `Stage A API failed: ${err.message}`);
     }
 
-    // ── Stage B — target hours ──
-    await setProgress(25, 'Stage B: target hours');
-    if (target.length > 0) {
+    // ── Stage A2 — Puppeteer fallback for target when API gave nothing ──
+    // Either the refresh token is missing/expired, OR the client doesn't own
+    // this brand on Google Business. Either way, fall back to scraping the
+    // target from public Google Maps using its name (same path as competitors).
+    if (target.length === 0) {
+      await setProgress(18, 'Stage A2: target via public Google Maps');
       try {
-        target = await scrapeHoursForAnoosh(target, cfg);
-        fs.writeFileSync(cfg.ANOOSH_CACHE, JSON.stringify(target, null, 2));
+        target = await scrapeBrand(cfg.TARGET_SEARCH, cfg, checkCancellation);
+        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+        await log('info', `Stage A2 — ${target.length} target branches (Puppeteer fallback)`);
+      } catch (err: any) {
+        await log('error', `Stage A2 fallback also failed: ${err.message}`);
+      }
+    }
+
+    // ── Stage B — target hours (only meaningful when API path was used) ──
+    await setProgress(25, 'Stage B: target hours');
+    if (apiPathWorked && target.length > 0) {
+      try {
+        target = await scrapeHoursForTarget(target, cfg, checkCancellation);
+        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
         await log('info', `Stage B — hours scraped`);
       } catch (err: any) { await log('warn', `Stage B failed: ${err.message}`); }
+    } else if (target.length > 0) {
+      await log('info', 'Stage B skipped — Puppeteer fallback already collected hours');
     }
 
     // ── Stage C — competitors ──
+    await checkCancellation();
     await setProgress(45, 'Stage C: competitors');
     let competitors: any[] = [];
     try {
-      competitors = await scrapeCompetitors(cfg);
+      competitors = await scrapeCompetitors(cfg, checkCancellation);
       await log('info', `Stage C — ${competitors.length} competitor branches`);
     } catch (err: any) {
       await log('error', `Stage C failed: ${err.message}`);
@@ -114,22 +145,51 @@ export async function runJob(job: Job): Promise<void> {
     // ── Stage D — popular times ──
     await setProgress(65, 'Stage D: popular times');
     try {
-      rawPlaces = await scrapePopularTimes(rawPlaces, cfg);
+      rawPlaces = await scrapePopularTimes(rawPlaces, cfg, checkCancellation);
       fs.writeFileSync(cfg.RAW_JSON_FILE, JSON.stringify(rawPlaces, null, 2));
     } catch (err: any) { await log('warn', `Stage D failed: ${err.message}`); }
 
     // ── Stage E — analyze + files ──
+    await checkCancellation();
     await setProgress(78, 'Stage E: analyze + build files');
+
+    // Filter reviews by date range if provided
+    if (job.date_start || job.date_end) {
+      const start = job.date_start ? new Date(job.date_start) : new Date(0);
+      const end   = job.date_end ? new Date(job.date_end) : new Date();
+      end.setHours(23, 59, 59, 999);
+
+      await log('info', `Filtering reviews by date range: ${job.date_start || 'any'} to ${job.date_end || 'today'}`);
+      
+      let filteredCount = 0;
+      rawPlaces = rawPlaces.map(place => {
+        if (!place.reviews) return place;
+        const initialCount = place.reviews.length;
+        const keptReviews = place.reviews.filter((r: any) => {
+          if (!r.publishedAtDate) return true; // keep if date unknown? or discard? let's keep.
+          const d = new Date(r.publishedAtDate);
+          return d >= start && d <= end;
+        });
+        filteredCount += (initialCount - keptReviews.length);
+        return { ...place, reviews: keptReviews };
+      });
+      await log('info', `Filtered out ${filteredCount} reviews outside range`);
+    }
+
     const analysis = analyze(rawPlaces, cfg);
     writeWorkbook(analysis, cfg);
     writeReport(analysis, cfg);
 
     // ── Stage F — push business data to client DB ──
     await setProgress(85, 'Saving data to your database');
-    await pushDataToClientDb(cdb, job.id, rawPlaces, analysis, target);
-    await log('info', 'Branches, reviews, analyses written to your DB');
+    await pushDataToClientDb(cdb, job.id, rawPlaces, analysis, target, {
+      dateStart: job.date_start ?? null,
+      dateEnd:   job.date_end   ?? null,
+    }, { target_name: job.target_name, competitors: job.competitors });
+    await log('info', 'Branches, reviews, analyses, branch_analytics written to your DB');
 
     // ── Stage G — upload files to client Storage ──
+    await checkCancellation();
     await setProgress(92, 'Uploading report files to your storage');
     const { excel_url, report_url } = await uploadReportsToClientStorage(cdb, job.id, cfg);
     await log('info', 'Files uploaded — public URLs ready');
@@ -197,6 +257,10 @@ export async function runJob(job: Job): Promise<void> {
     await log('info', '✅ Job succeeded');
 
   } catch (err: any) {
+    if (err?.message === 'STOPPED_BY_USER') {
+      await log('info', 'Job stopped by user command');
+      return;
+    }
     const msg = err?.message || String(err);
     console.error(`[job:${job.id}] FATAL`, err);
     await sb.from('job_logs').insert({ job_id: job.id, level: 'error', message: 'FATAL: ' + msg });
@@ -220,8 +284,29 @@ export async function runJob(job: Job): Promise<void> {
 //  Helpers
 // ──────────────────────────────────────────────────────────────
 
-async function pushDataToClientDb(cdb: any, jobId: string, rawPlaces: any[], analysis: any, targetPlaces: any[]) {
+async function pushDataToClientDb(
+  cdb: any,
+  jobId: string,
+  rawPlaces: any[],
+  analysis: any,
+  targetPlaces: any[],
+  window: { dateStart: string | null; dateEnd: string | null },
+  job: { target_name: string; competitors: string[] },
+) {
   const targetSet = new Set(targetPlaces.map(t => t.title));
+  const detectBrand = makeBrandDetector(job.target_name, job.competitors);
+
+  // Compute fallback rating from review stars when scraper didn't capture
+  // the place-level rating (some Google Maps layouts hide it, and the
+  // Business Profile API doesn't return one).
+  const avgFromReviews = (reviews: any[]): number => {
+    if (!Array.isArray(reviews) || reviews.length === 0) return 0;
+    const valid = reviews
+      .map(r => Number(r.stars ?? r.rating))
+      .filter(s => s >= 1 && s <= 5 && Number.isFinite(s));
+    if (valid.length === 0) return 0;
+    return Number((valid.reduce((s, n) => s + n, 0) / valid.length).toFixed(2));
+  };
 
   // Insert branches and capture their generated UUIDs to link reviews
   const branchRows = rawPlaces.map(p => ({
@@ -233,7 +318,9 @@ async function pushDataToClientDb(cdb: any, jobId: string, rawPlaces: any[], ana
     phone: p.phone || null,
     website: p.website || null,
     hours_json: p.hours || null,
-    popular_times: p.popularTimes || null,
+    stars: Number(p.rating) || avgFromReviews(p.reviews),
+    reviews_count: p.reviewsCount || p.reviews_count || p.reviews?.length || 0,
+    popular_times: p.popularTimes?.grid || p.popular_times || null,
     is_target: targetSet.has(p.title),
   }));
 
@@ -272,24 +359,92 @@ async function pushDataToClientDb(cdb: any, jobId: string, rawPlaces: any[], ana
     }
   }
 
-  // Analyses (per brand)
+  // Analyses (per brand) — aggregate star counts from branchRows since
+  // brandRows in the analyzer doesn't carry star histograms.
   if (analysis?.brandRows?.length > 0) {
+    const starsByBrand: Record<string, {s5:number;s4:number;s3:number;s2:number;s1:number}> = {};
+    for (const r of analysis.branchRows || []) {
+      if (!starsByBrand[r.brand]) starsByBrand[r.brand] = { s5:0, s4:0, s3:0, s2:0, s1:0 };
+      const acc = starsByBrand[r.brand];
+      acc.s5 += r.stars5 || 0; acc.s4 += r.stars4 || 0;
+      acc.s3 += r.stars3 || 0; acc.s2 += r.stars2 || 0; acc.s1 += r.stars1 || 0;
+    }
     const analysisRows = analysis.brandRows.map((b: any) => ({
       job_id: jobId,
       brand: b.brand,
       branch_count: b.totalBranches,
       total_reviews_3m: b.totalReviews3m,
       avg_rating_3m: b.avgRating3m,
-      // The analyzer doesn't provide these aggregates per-brand in brandRows yet, 
-      // but the table expects them. Defaulting to 0 for now.
-      star_5_count: 0,
-      star_4_count: 0,
-      star_3_count: 0,
-      star_2_count: 0,
-      star_1_count: 0,
+      star_5_count: starsByBrand[b.brand]?.s5 || 0,
+      star_4_count: starsByBrand[b.brand]?.s4 || 0,
+      star_3_count: starsByBrand[b.brand]?.s3 || 0,
+      star_2_count: starsByBrand[b.brand]?.s2 || 0,
+      star_1_count: starsByBrand[b.brand]?.s1 || 0,
     }));
     const { error } = await cdb.from('analyses').insert(analysisRows);
     if (error) throw new Error('Failed inserting analyses: ' + error.message);
+  }
+
+  // ── Branch analytics (mirrors Excel "Branch Wise Data" sheet) ──
+  if (analysis?.branchRows?.length > 0) {
+    const placeByName = new Map<string, any>();
+    for (const p of rawPlaces) placeByName.set(p.title, p);
+
+    const analyticsRows = analysis.branchRows.map((r: any) => {
+      const pt   = r.popularTimes || {};
+      const peak = pt.available
+        ? `${pt.peakDay || ''} ${pt.peakHour || ''}${pt.peakBusyness != null ? ` (${pt.peakBusyness}%)` : ''}`.trim()
+        : null;
+      const place = placeByName.get(r.branchName);
+      const mapsLink = r.addressLink || place?.addressLink || place?.url || null;
+
+      // business_hours: flatten {Mon:"7AM-12AM",...} to pipe-separated string
+      let businessHours: string | null = null;
+      if (r.hours && typeof r.hours === 'object' && !Array.isArray(r.hours)) {
+        businessHours = Object.entries(r.hours).map(([d, h]) => `${d}: ${h}`).join(' | ');
+      } else if (typeof r.hours === 'string') {
+        businessHours = r.hours;
+      }
+
+      return {
+        job_id: jobId,
+        branch_id: branchIdByKey.get(`${r.brand}|${r.branchName}`) || null,
+        brand: r.brand,
+        branch_name: r.branchName,
+        city: r.city || null,
+        address: r.address || null,
+        google_maps_link: mapsLink,
+        business_hours: businessHours,
+        phone: r.phone || null,
+        peak_day: pt.peakDay || null,
+        peak_hour: pt.peakHour || null,
+        peak_busyness_pct: pt.peakBusyness ?? null,
+        peak_time: peak,
+        busy_hours_summary: pt.summary || null,
+        avg_rating_period: r.avgRating3m,
+        total_reviews_period: r.totalReviews3m || 0,
+        month_1_reviews: r.month1Count || 0,
+        month_1_avg_rating: r.month1Avg,
+        month_2_reviews: r.month2Count || 0,
+        month_2_avg_rating: r.month2Avg,
+        month_3_reviews: r.month3Count || 0,
+        month_3_avg_rating: r.month3Avg,
+        star_5_count: r.stars5 || 0,
+        star_4_count: r.stars4 || 0,
+        star_3_count: r.stars3 || 0,
+        star_2_count: r.stars2 || 0,
+        star_1_count: r.stars1 || 0,
+        popular_times_grid: pt.grid || null,
+        date_start: window.dateStart,
+        date_end:   window.dateEnd,
+      };
+    });
+
+    for (let i = 0; i < analyticsRows.length; i += 200) {
+      const chunk = analyticsRows.slice(i, i + 200);
+      const { error } = await cdb.from('branch_analytics').insert(chunk);
+      if (error) throw new Error('Failed inserting branch_analytics: ' + error.message);
+    }
   }
 }
 
@@ -316,9 +471,21 @@ async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any) {
   return { excel_url: pub1.publicUrl, report_url: pub2.publicUrl };
 }
 
-function detectBrand(p: any): string {
-  if (p.__brandHint) return p.__brandHint;          // set by scraper
-  return p.title || 'Unknown';
+/** Build a brand-classifier closure over this job's target + competitors. */
+function makeBrandDetector(target: string, competitors: string[]) {
+  const keywords = [
+    { keyword: target.toLowerCase(), brand: target },
+    ...competitors.map(c => ({ keyword: c.toLowerCase(), brand: c })),
+  ];
+  return function detect(p: any): string {
+    if (p?.__searchBrand) return p.__searchBrand;
+    if (p?.__brandHint)   return p.__brandHint;
+    const t = (p?.title || '').toLowerCase();
+    for (const { keyword, brand } of keywords) {
+      if (keyword && t.includes(keyword)) return brand;
+    }
+    return 'Other';
+  };
 }
 
 function extractCity(addr?: string): string | null {

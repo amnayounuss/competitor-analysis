@@ -14,14 +14,17 @@ export default async function AdminPage() {
   if (!profile?.is_admin) redirect('/dashboard');
 
   return (
-    <main className="max-w-5xl mx-auto p-6">
-      <header className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Admin panel</h1>
-          <p className="text-sm text-gray-600">Signed in as {user.email}</p>
+    <main className="max-w-6xl mx-auto p-8 space-y-10">
+      <header className="flex items-end justify-between border-b border-slate-100 pb-8">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100 mb-2">
+            System Administration
+          </div>
+          <h1 className="text-4xl font-bold text-slate-900 tracking-tight">Control Center</h1>
+          <p className="text-sm font-medium text-slate-500">Root authorization: <span className="text-indigo-600 font-bold">{user.email}</span></p>
         </div>
-        <Link href="/dashboard" className="text-sm border rounded px-3 py-1.5 hover:bg-gray-50">
-          ← Back to dashboard
+        <Link href="/dashboard" className="btn-secondary px-5 py-2.5 text-xs">
+          ← Dashboard
         </Link>
       </header>
       <AdminPanel />
