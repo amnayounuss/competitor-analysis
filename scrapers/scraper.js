@@ -105,12 +105,24 @@ async function discoverBranchesForBrand(browser, brand) {
   const branches = await extractBranchesFromPage(page);
   await page.close();
 
+  const nameWords = brand.name.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
   const filtered = branches
-    .filter((b) => b.title.toLowerCase().includes(brand.name.toLowerCase()))
+    .filter((b) => {
+      const t = b.title.toLowerCase();
+      return nameWords.some((w) => t.includes(w));
+    })
     .map((b) => ({ ...b, __searchBrand: brand.key }));
 
-  console.log(`[stage1:${brand.key}] ${branches.length} raw → ${filtered.length} brand-match`);
-  return filtered;
+  if (filtered.length > 0) {
+    console.log(`[stage1:${brand.key}] ${branches.length} raw → ${filtered.length} brand-match (keywords: ${nameWords.join(", ")})`);
+    return filtered;
+  }
+
+  // Fallback: strict filter returned 0 — common when Google Maps titles are
+  // in Arabic or a different script. The search URL was already brand-specific,
+  // so accept all discovered branches and tag them with this brand.
+  console.warn(`[stage1:${brand.key}] ${branches.length} raw → 0 strict match (keywords: ${nameWords.join(", ")}) — accepting all results as fallback`);
+  return branches.map((b) => ({ ...b, __searchBrand: brand.key }));
 }
 
 async function discoverBranches(browser) {
@@ -431,7 +443,10 @@ async function scrapeCompetitors() {
       branches = await discoverBranches(browser);
       fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
     }
-    if (branches.length === 0) throw new Error("No competitor branches discovered");
+    if (branches.length === 0) {
+      console.warn("[scraper] no competitor branches discovered — continuing with empty list");
+      return [];
+    }
 
     const full = await scrapeBranches(browser, branches);
     return full;

@@ -1,5 +1,4 @@
-// Dashboard Page
-import { serverClient } from '@/lib/supabase';
+import { serverClient, adminClient } from '@/lib/supabase';
 import { getClientDbCreds, clientDbClient } from '@/lib/client-db';
 import DashboardView from './dashboard-view';
 import Link from 'next/link';
@@ -11,18 +10,19 @@ export default async function DashboardOverview() {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return null;
 
-  // Most-recent succeeded job tells us the user's "focus brand" + competitor set
-  const { data: latestJob } = await sb
+  const admin = adminClient();
+  const { data: latestJob } = await admin
     .from('jobs')
-    .select('target_name, competitors')
+    .select('id, target_name, competitors, date_start, date_end, search_location, finished_at')
     .eq('user_id', user.id)
-    .in('status', ['succeeded', 'running'])
-    .order('queued_at', { ascending: false })
+    .eq('status', 'succeeded')
+    .order('finished_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   const targetBrand = latestJob?.target_name || null;
   const competitorBrands: string[] = Array.isArray(latestJob?.competitors) ? latestJob!.competitors : [];
+  const jobId = latestJob?.id || null;
 
   let dashboardData = null;
   let dbConnected = false;
@@ -32,22 +32,25 @@ export default async function DashboardOverview() {
     const cdb = clientDbClient(creds);
     dbConnected = true;
 
-    // Fetch aggregate data
-    const { data: branches } = await cdb.from('branches').select('*');
-    const { data: history } = await cdb.from('job_history').select('*').order('finished_at', { ascending: true });
-    const { data: analyses } = await cdb.from('analyses').select('*');
-    const { data: reviews } = await cdb.from('reviews').select('*').order('published_at', { ascending: false }).limit(2000);
+    if (jobId) {
+      const [analyticsRes, analysesRes] = await Promise.all([
+        cdb.from('branch_analytics').select('*').eq('job_id', jobId),
+        cdb.from('analyses').select('*').eq('job_id', jobId),
+      ]);
 
-    dashboardData = {
-      branches: branches || [],
-      history: history || [],
-      analyses: analyses || [],
-      reviews: reviews || [],
-      targetBrand,
-      competitorBrands,
-    };
+      dashboardData = {
+        analytics: analyticsRes.data || [],
+        analyses: analysesRes.data || [],
+        targetBrand,
+        competitorBrands,
+        jobId,
+        dateStart: latestJob?.date_start || null,
+        dateEnd: latestJob?.date_end || null,
+        finishedAt: latestJob?.finished_at || null,
+      };
+    }
   } catch (err) {
-    console.error('[dashboard] failed to fetch aggregate data:', err);
+    console.error('[dashboard] failed to fetch data:', err);
   }
 
   if (!dbConnected) {
@@ -58,9 +61,9 @@ export default async function DashboardOverview() {
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
           <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-2">Database Not Connected</h2>
-          <p className="text-slate-500 font-medium mb-8 text-balance">Please connect your Supabase database to unlock global analytics and trend tracking.</p>
+          <p className="text-slate-500 font-medium mb-8 text-balance">Connect your Supabase database to see analytics.</p>
           <Link href="/connect-database" className="px-8 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 transition-all active:scale-95">
-            Setup Connection →
+            Setup Connection
           </Link>
         </div>
       </div>
@@ -68,12 +71,14 @@ export default async function DashboardOverview() {
   }
 
   const finalData = dashboardData || {
-    branches: [],
-    history: [],
+    analytics: [],
     analyses: [],
-    reviews: [],
     targetBrand,
     competitorBrands,
+    jobId: null,
+    dateStart: null,
+    dateEnd: null,
+    finishedAt: null,
   };
 
   return (
@@ -81,11 +86,9 @@ export default async function DashboardOverview() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Executive Overview</h1>
-          <p className="text-slate-500 font-medium mt-1 text-sm">Aggregated market intelligence across your entire portfolio.</p>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 shadow-sm">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[10px] font-black uppercase tracking-widest">Real-time Feed Active</span>
+          <p className="text-slate-500 font-medium mt-1 text-sm">
+            {targetBrand ? `${targetBrand} vs ${competitorBrands.join(', ')}` : 'Run an analysis to see results'}
+          </p>
         </div>
       </div>
 

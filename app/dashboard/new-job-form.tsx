@@ -13,6 +13,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
   const router = useRouter();
   const [target, setTarget]     = useState('');
   const [comps, setComps]       = useState('');
+  const [location, setLocation] = useState('');
   const [token, setToken]       = useState('');
   const [email, setEmail]       = useState(defaultEmail);
   const [dateStart, setDateStart] = useState(isoDaysAgo(90));
@@ -45,6 +46,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
         body: JSON.stringify({
           target_name: target.trim(), competitors,
           refresh_token: token.trim(), email_to: email.trim(),
+          search_location: location.trim() || undefined,
           date_start: dateStart || undefined,
           date_end: dateEnd || undefined,
         }),
@@ -95,14 +97,27 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
 
       <div className="space-y-1.5">
         <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Competitor names</label>
-        <input 
-          type="text" 
-          required 
-          value={comps} 
+        <input
+          type="text"
+          required
+          value={comps}
           onChange={e=>setComps(e.target.value)}
-          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
-          placeholder="comma-separated competitor names"
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+          placeholder="e.g. Patchi, Bostani"
         />
+        <p className="text-[11px] text-slate-400 font-medium ml-1">Brand names only — don&apos;t include the country or city here.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Search location</label>
+        <input
+          type="text"
+          value={location}
+          onChange={e=>setLocation(e.target.value)}
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+          placeholder="e.g. Saudi Arabia, Riyadh, Dubai UAE"
+        />
+        <p className="text-[11px] text-slate-400 font-medium ml-1">Narrows Google Maps search to this region. Leave empty for worldwide.</p>
       </div>
 
       <div className="space-y-2">

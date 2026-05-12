@@ -1,9 +1,9 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
-import { serverClient } from '@/lib/supabase';
+import { serverClient, adminClient } from '@/lib/supabase';
 import { getClientDbCreds, clientDbClient } from '@/lib/client-db';
 import LiveJobView from './live-job-view';
-import AnalysisDashboard from './analysis-dashboard';
+import DashboardView from '@/app/dashboard/dashboard-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,46 +12,53 @@ export default async function JobPage({ params }: { params: { id: string } }) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: job } = await sb
+  const admin = adminClient();
+  const { data: job } = await admin
     .from('jobs')
     .select('*')
     .eq('id', params.id)
+    .eq('user_id', user.id)
     .single();
 
   if (!job) notFound();
 
-  // If job is finished, we pull data from the Client DB for the dashboard
   let dashboardData: {
     analytics: any[];
-    reviews: any[];
     analyses: any[];
+    targetBrand: string | null;
+    competitorBrands: string[];
+    jobId: string | null;
+    dateStart: string | null;
+    dateEnd: string | null;
+    finishedAt: string | null;
   } | null = null;
+
   if (job.status === 'succeeded') {
     try {
       const creds = await getClientDbCreds(user.id);
       const cdb = clientDbClient(creds);
 
-      const [analyticsRes, reviewsRes, analysesRes] = await Promise.all([
+      const [analyticsRes, analysesRes] = await Promise.all([
         cdb.from('branch_analytics').select('*').eq('job_id', job.id),
-        cdb.from('reviews')
-           .select('id, brand, rating, text, reviewer_name, published_at, branch_id')
-           .eq('job_id', job.id)
-           .order('published_at', { ascending: false })
-           .limit(2000),
         cdb.from('analyses').select('*').eq('job_id', job.id),
       ]);
 
       dashboardData = {
         analytics: analyticsRes.data || [],
-        reviews:   reviewsRes.data   || [],
-        analyses:  analysesRes.data  || [],
+        analyses: analysesRes.data || [],
+        targetBrand: job.target_name,
+        competitorBrands: Array.isArray(job.competitors) ? job.competitors : [],
+        jobId: job.id,
+        dateStart: job.date_start || null,
+        dateEnd: job.date_end || null,
+        finishedAt: job.finished_at || null,
       };
     } catch (err) {
-      console.error('[dashboard] failed to fetch client data:', err);
+      console.error('[job-dashboard] failed to fetch client data:', err);
     }
   }
 
-  const { data: logs } = await sb
+  const { data: logs } = await admin
     .from('job_logs')
     .select('id, level, message, created_at')
     .eq('job_id', params.id)
@@ -70,7 +77,15 @@ export default async function JobPage({ params }: { params: { id: string } }) {
       </div>
 
       {job.status === 'succeeded' && dashboardData ? (
-        <AnalysisDashboard job={job} data={dashboardData} />
+        <div className="px-4 sm:px-10 py-10 space-y-10">
+          <div>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Executive Overview</h1>
+            <p className="text-slate-500 font-medium mt-1 text-sm">
+              {job.target_name} vs {(Array.isArray(job.competitors) ? job.competitors : []).join(', ')}
+            </p>
+          </div>
+          <DashboardView data={dashboardData} />
+        </div>
       ) : (
         <LiveJobView initialJob={job} initialLogs={logs || []} />
       )}

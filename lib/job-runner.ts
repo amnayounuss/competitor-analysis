@@ -135,12 +135,15 @@ export async function runJob(job: Job): Promise<void> {
       competitors = await scrapeCompetitors(cfg, checkCancellation);
       await log('info', `Stage C — ${competitors.length} competitor branches`);
     } catch (err: any) {
-      await log('error', `Stage C failed: ${err.message}`);
-      throw err;
+      await log('warn', `Stage C failed: ${err.message} — continuing with target data only`);
     }
 
     let rawPlaces = [...target, ...competitors];
+    if (rawPlaces.length === 0) {
+      throw new Error('No branches discovered for target or competitors. Check that the brand names are correct and Google Maps returns results for them.');
+    }
     fs.writeFileSync(cfg.RAW_JSON_FILE, JSON.stringify(rawPlaces, null, 2));
+    await log('info', `Merged: ${target.length} target + ${competitors.length} competitor = ${rawPlaces.length} branches`);
 
     // ── Stage D — popular times ──
     await setProgress(65, 'Stage D: popular times');
