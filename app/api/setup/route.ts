@@ -9,12 +9,14 @@ const SetupSchema = z.object({
     password: z.string().min(8),
     full_name: z.string().min(1).optional(),
   }),
-  gmail: z.object({
-    user: z.string().email(),
+  smtp: z.object({
+    host: z.string().min(1),
+    port: z.number().int().default(587),
+    user: z.string().min(1),
+    pass: z.string().min(1),
+    secure: z.boolean().default(false),
     from_name: z.string().min(1).default('Reports'),
-    oauth_client_id: z.string().min(10),
-    oauth_client_secret: z.string().min(10),
-    refresh_token: z.string().min(20),
+    from_email: z.string().email().or(z.literal('')).optional(),
   }),
   gmb: z.object({
     oauth_client_id: z.string().min(10),
@@ -41,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   const sb = adminClient();
-  const { admin, gmail, gmb, signup_allowed } = parsed.data;
+  const { admin, smtp, gmb, signup_allowed } = parsed.data;
 
   let userId: string | undefined;
 
@@ -54,11 +56,9 @@ export async function POST(req: NextRequest) {
   });
 
   if (createErr) {
-    // If user already exists, we find their ID to promote them
     if (createErr.message.toLowerCase().includes('already been registered')) {
       const { data: listData, error: listErr } = await sb.auth.admin.listUsers();
       if (listErr) return NextResponse.json({ error: 'list users failed: ' + listErr.message }, { status: 500 });
-
       const existing = listData.users.find(u => u.email?.toLowerCase() === admin.email.toLowerCase());
       if (!existing) return NextResponse.json({ error: 'User exists but not found in list' }, { status: 500 });
       userId = existing.id;
@@ -91,11 +91,13 @@ export async function POST(req: NextRequest) {
     .from('app_settings')
     .upsert({
       id: 1,
-      gmail_user: gmail.user,
-      gmail_from_name: gmail.from_name,
-      gmail_oauth_client_id: gmail.oauth_client_id,
-      gmail_oauth_client_secret: gmail.oauth_client_secret,
-      gmail_refresh_token: gmail.refresh_token,
+      smtp_host: smtp.host,
+      smtp_port: smtp.port,
+      smtp_user: smtp.user,
+      smtp_pass: smtp.pass,
+      smtp_secure: smtp.secure,
+      smtp_from_name: smtp.from_name,
+      smtp_from_email: smtp.from_email || null,
       gmb_oauth_client_id: gmb.oauth_client_id,
       gmb_oauth_client_secret: gmb.oauth_client_secret,
       signup_allowed,
@@ -103,6 +105,7 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
       updated_by: userId,
     }, { onConflict: 'id' });
+
   if (settingsErr) {
     return NextResponse.json({ error: 'settings save failed: ' + settingsErr.message }, { status: 500 });
   }

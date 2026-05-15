@@ -1,7 +1,7 @@
 /**
  * analyzer.js
  * Pure data processing — takes raw Apify place records and computes:
- *   - per-branch metrics (last N months)
+ *   - per-branch metrics (period-based)
  *   - per-brand aggregates
  *
  * Zero I/O. Safe to unit-test.
@@ -133,9 +133,9 @@ function computeBranchMetrics(place, cutoffDate, endDate) {
     .sort((a, b) => b.date - a.date) // newest first
     .map(({ review, date }) => {
       const offset = now.getTime() - date.getTime();
-      const bucket = offset <= thirdMs       ? "Month 1 (newest third)"
-                  : offset <= 2 * thirdMs    ? "Month 2 (middle third)"
-                  :                            "Month 3 (oldest third)";
+      const bucket = offset <= thirdMs       ? "Period 1 (newest third)"
+                  : offset <= 2 * thirdMs    ? "Period 2 (middle third)"
+                  :                            "Period 3 (oldest third)";
       return {
         date:        date.toISOString().slice(0, 10),
         monthBucket: bucket,
@@ -153,20 +153,20 @@ function computeBranchMetrics(place, cutoffDate, endDate) {
     hours:            place.hours || "",
     phone:            place.phone || "",
     popularTimes:     place.popularTimes || null,
-    avgRating3m:      avgRating,
-    totalReviews3m:   recent.length,
+    avgRatingPeriod:      avgRating,
+    totalReviewsPeriod:   recent.length,
     stars5:           stars[5],
     stars4:           stars[4],
     stars3:           stars[3],
     stars2:           stars[2],
     stars1:           stars[1],
-    // Per-month breakdown
-    month1Count:      monthStats[0].count,  // 0-30 days ago (newest)
-    month1Avg:        monthStats[0].avg,
-    month2Count:      monthStats[1].count,  // 30-60 days ago
-    month2Avg:        monthStats[1].avg,
-    month3Count:      monthStats[2].count,  // 60-90 days ago (oldest)
-    month3Avg:        monthStats[2].avg,
+    // Per-period breakdown
+    period1Count:      monthStats[0].count,  // newest third
+    period1Avg:        monthStats[0].avg,
+    period2Count:      monthStats[1].count,  // middle third
+    period2Avg:        monthStats[1].avg,
+    period3Count:      monthStats[2].count,  // oldest third
+    period3Avg:        monthStats[2].avg,
     // Flat review list for "All Reviews" sheet
     reviewsExport,
     // Keep a sample of review texts for sentiment section of the report
@@ -195,21 +195,21 @@ function computeBrandSummary(branchRows) {
       };
     }
     byBrand[b].totalBranches += 1;
-    byBrand[b].totalReviews  += row.totalReviews3m;
+    byBrand[b].totalReviews  += row.totalReviewsPeriod;
     byBrand[b].branches.push(row);
 
-    if (row.avgRating3m !== null && row.totalReviews3m > 0) {
-      byBrand[b].ratingSum    += row.avgRating3m * row.totalReviews3m;
-      byBrand[b].ratingWeight += row.totalReviews3m;
+    if (row.avgRatingPeriod !== null && row.totalReviewsPeriod > 0) {
+      byBrand[b].ratingSum    += row.avgRatingPeriod * row.totalReviewsPeriod;
+      byBrand[b].ratingWeight += row.totalReviewsPeriod;
     }
   }
 
   return Object.values(byBrand).map((b) => ({
     brand:          b.brand,
-    avgRating3m:    b.ratingWeight > 0
+    avgRatingPeriod:    b.ratingWeight > 0
                        ? Number((b.ratingSum / b.ratingWeight).toFixed(2))
                        : null,
-    totalReviews3m: b.totalReviews,
+    totalReviewsPeriod: b.totalReviews,
     totalBranches:  b.totalBranches,
     branches:       b.branches, // kept for the report, dropped from Excel
   }));
@@ -230,8 +230,8 @@ function analyze(rawPlaces) {
   const brandRows  = computeBrandSummary(branchRows);
 
   const ranked = [...branchRows]
-    .filter((r) => r.totalReviews3m > 0 && r.avgRating3m !== null)
-    .sort((a, b) => b.avgRating3m - a.avgRating3m || b.totalReviews3m - a.totalReviews3m);
+    .filter((r) => r.totalReviewsPeriod > 0 && r.avgRatingPeriod !== null)
+    .sort((a, b) => b.avgRatingPeriod - a.avgRatingPeriod || b.totalReviewsPeriod - a.totalReviewsPeriod);
 
   return {
     cutoffDate:  cutoff,

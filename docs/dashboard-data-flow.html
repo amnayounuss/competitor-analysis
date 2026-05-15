@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anoosh SaaS — Dashboard Data Flow Documentation</title>
+<style>
+  @page { margin: 1.8cm 2cm; size: A4; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: #1e293b; line-height: 1.6; background: #fff; padding: 2rem; max-width: 900px; margin: 0 auto; }
+
+  /* Cover */
+  .cover { text-align: center; padding: 4rem 2rem 3rem; margin-bottom: 2rem; border-bottom: 3px solid #4F46E5; }
+  .cover h1 { font-size: 2rem; font-weight: 900; color: #4F46E5; letter-spacing: -0.02em; }
+  .cover .subtitle { font-size: 1.1rem; color: #64748b; margin-top: 0.5rem; font-weight: 600; }
+  .cover .meta { margin-top: 1.5rem; font-size: 0.85rem; color: #94a3b8; }
+
+  /* Sections */
+  h2 { font-size: 1.3rem; font-weight: 900; color: #4F46E5; margin: 2.5rem 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 2px solid #E0E7FF; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; font-weight: 800; color: #334155; margin: 1.5rem 0 0.5rem; }
+  h4 { font-size: 0.9rem; font-weight: 700; color: #475569; margin: 1rem 0 0.4rem; }
+  p, li { font-size: 0.88rem; color: #475569; }
+  ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+  li { margin-bottom: 0.3rem; }
+  strong { color: #1e293b; }
+
+  /* Code blocks */
+  pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; font-size: 0.78rem; line-height: 1.5; overflow-x: auto; margin: 0.8rem 0; font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; color: #334155; }
+  code { font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace; font-size: 0.82rem; background: #f1f5f9; padding: 0.1em 0.4em; border-radius: 4px; color: #4F46E5; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.82rem; }
+  th { background: #4F46E5; color: #fff; font-weight: 800; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { padding: 0.5rem 0.8rem; border-bottom: 1px solid #e2e8f0; color: #475569; }
+  tr:nth-child(even) { background: #f8fafc; }
+  tr:hover { background: #EEF2FF; }
+
+  /* Flow diagram */
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 1rem 0; }
+  .flow-step { display: flex; align-items: stretch; }
+  .flow-num { width: 48px; min-width: 48px; display: flex; flex-direction: column; align-items: center; }
+  .flow-num .circle { width: 32px; height: 32px; border-radius: 50%; background: #4F46E5; color: #fff; font-weight: 900; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; }
+  .flow-num .line { flex: 1; width: 2px; background: #C7D2FE; }
+  .flow-body { flex: 1; padding: 0.3rem 0 1.5rem 1rem; }
+  .flow-body .title { font-weight: 800; font-size: 0.95rem; color: #1e293b; }
+  .flow-body .file { font-size: 0.78rem; color: #4F46E5; font-weight: 600; }
+  .flow-body .desc { font-size: 0.85rem; color: #64748b; margin-top: 0.3rem; }
+
+  /* Callout boxes */
+  .callout { background: #EEF2FF; border-left: 4px solid #4F46E5; padding: 0.8rem 1rem; border-radius: 0 8px 8px 0; margin: 0.8rem 0; }
+  .callout.green { background: #ECFDF5; border-color: #10B981; }
+  .callout.amber { background: #FFFBEB; border-color: #F59E0B; }
+  .callout p { font-size: 0.85rem; color: #334155; }
+  .callout strong { color: #4F46E5; }
+  .callout.green strong { color: #059669; }
+  .callout.amber strong { color: #D97706; }
+
+  /* Page break hint */
+  .page-break { page-break-before: always; }
+
+  /* Print */
+  @media print {
+    body { padding: 0; }
+    .cover { padding-top: 6rem; padding-bottom: 4rem; }
+    pre { font-size: 0.72rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ COVER ═══════════════════ -->
+<div class="cover">
+  <h1>Dashboard Data Flow</h1>
+  <div class="subtitle">How data is scraped, computed, stored, and displayed</div>
+  <div class="meta">
+    Anoosh SaaS &mdash; Multi-Tenant Google Reviews Competitor Analysis Platform<br>
+    Generated: May 2026
+  </div>
+</div>
+
+<!-- ═══════════════════ PIPELINE OVERVIEW ═══════════════════ -->
+<h2>1. Pipeline Overview</h2>
+<p>Data flows through 6 stages from Google Maps to the dashboard. Each stage transforms and enriches the data before passing it forward.</p>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">1</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">Scraping</div>
+      <div class="file">target-fetcher.js &middot; scraper.js &middot; hours-scraper.js &middot; popular-times.js</div>
+      <div class="desc">Collects raw branch data, reviews, hours, and popular times from Google APIs and Google Maps via Puppeteer.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">2</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">Analysis</div>
+      <div class="file">analyzer.js</div>
+      <div class="desc">Pure computation &mdash; takes raw places, filters reviews by date window, computes per-branch metrics and per-brand aggregates.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">3</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">File Generation</div>
+      <div class="file">excel-builder.js &middot; report-builder.js</div>
+      <div class="desc">Produces the 6-sheet Excel workbook and Markdown analytical report.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">4</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">Database Insert</div>
+      <div class="file">job-runner.ts &rarr; pushDataToClientDb()</div>
+      <div class="desc">Inserts branches, reviews, analyses, and branch_analytics into the client's Supabase database.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">5</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">Dashboard Query</div>
+      <div class="file">app/dashboard/page.tsx</div>
+      <div class="desc">Server component fetches the latest succeeded job's branch_analytics and analyses from the client DB.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num"><div class="circle">6</div><div class="line"></div></div>
+    <div class="flow-body">
+      <div class="title">Dashboard Render</div>
+      <div class="file">app/dashboard/dashboard-view.tsx</div>
+      <div class="desc">Client component aggregates branch_analytics rows into brand summaries, computes chart data, and renders SVG charts.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ STAGE 1: SCRAPING ═══════════════════ -->
+<h2 class="page-break">2. Stage 1 &mdash; Scraping (Raw Data Collection)</h2>
+
+<h3>2.1 Target Brand (Google Business Profile API)</h3>
+<p><strong>File:</strong> <code>scrapers/target-fetcher.js</code></p>
+<p>Uses the client's OAuth refresh token to call Google's Business Profile API. For each location found:</p>
+<pre>
+{
+  title:           "Anoosh - Riyadh Park",
+  address:         "Riyadh Park Mall, Floor 1, Riyadh 12345, SA",
+  phone:           "+966 11 234 5678",
+  placeId:         "ChIJ...",
+  url:             "https://google.com/maps/place/?q=place_id:ChIJ...",
+  reviews: [
+    { stars: 5, publishedAtDate: "2026-03-15T...", text: "Amazing service" },
+    { stars: 3, publishedAtDate: "2026-02-20T...", text: "Too crowded" },
+    ...
+  ],
+  __searchBrand:   "Anoosh"     // &larr; from config.targetName
+}
+</pre>
+
+<h3>2.2 Competitors (Puppeteer Scraping)</h3>
+<p><strong>File:</strong> <code>scrapers/scraper.js</code></p>
+<p>Opens Google Maps search URLs (e.g. <code>google.com/maps/search/Patchi+Saudi+Arabia</code>), scrolls the results feed to discover branch URLs, then visits each branch page to extract:</p>
+<ul>
+  <li><strong>Address, hours, phone</strong> &mdash; from the place details panel</li>
+  <li><strong>Rating &amp; review count</strong> &mdash; Google's displayed values (e.g. 4.3 stars, 1,234 reviews)</li>
+  <li><strong>Individual reviews</strong> &mdash; from the Reviews tab, sorted newest-first. Relative dates like "2 months ago" are converted to ISO dates.</li>
+</ul>
+<p>Each branch is tagged with <code>__searchBrand</code> matching the competitor name from the job config.</p>
+
+<h3>2.3 Brand Matching Logic</h3>
+<div class="callout">
+  <p><strong>Priority order:</strong></p>
+  <p>1. <code>__searchBrand</code> (set by scraper) &mdash; always trusted<br>
+     2. Keyword match against <code>BRAND_KEYWORDS</code> (target first, then competitors)<br>
+     3. Fallback: <code>"Other"</code></p>
+</div>
+<p>When Google Maps returns titles in Arabic or non-Latin scripts, the keyword match may fail. In this case, ALL results from a brand-specific search URL are accepted and tagged with that brand name (since the search query was already brand-specific).</p>
+
+<!-- ═══════════════════ STAGE 2: ANALYSIS ═══════════════════ -->
+<h2 class="page-break">3. Stage 2 &mdash; Analysis (Computation)</h2>
+<p><strong>File:</strong> <code>scrapers/analyzer.js</code> &rarr; <code>analyze(rawPlaces)</code></p>
+
+<h3>3.1 Date Window</h3>
+<pre>
+if (config.DATE_START &amp;&amp; config.DATE_END) {
+  window = [DATE_START 00:00:00, DATE_END 23:59:59]
+} else {
+  window = [today - LOOKBACK_MONTHS, today]
+}
+</pre>
+<p>Only reviews with <code>publishedAtDate</code> inside this window are counted.</p>
+
+<h3>3.2 Per-Branch Metrics</h3>
+<p>Function: <code>computeBranchMetrics(place, cutoffDate, endDate)</code></p>
+
+<table>
+  <tr><th>Field</th><th>Calculation</th></tr>
+  <tr><td><code>avgRating3m</code></td><td>Simple average of all review stars in window: <code>&Sigma;stars / count</code></td></tr>
+  <tr><td><code>totalReviews3m</code></td><td>Count of reviews where <code>cutoff &le; date &le; endDate</code></td></tr>
+  <tr><td><code>stars5..stars1</code></td><td>Histogram: count of reviews with each star rating (rounded)</td></tr>
+  <tr><td><code>month1Count</code></td><td>Reviews in newest third of window (0&ndash;33% from end)</td></tr>
+  <tr><td><code>month1Avg</code></td><td>Average stars for month 1 reviews only</td></tr>
+  <tr><td><code>month2Count/Avg</code></td><td>Reviews in middle third (33&ndash;67%)</td></tr>
+  <tr><td><code>month3Count/Avg</code></td><td>Reviews in oldest third (67&ndash;100%)</td></tr>
+</table>
+
+<div class="callout amber">
+  <p><strong>Window Division:</strong> The window is split into 3 equal time segments, NOT fixed 30-day periods. For a 90-day window, each "month" is 30 days. For a 6-month window, each is ~60 days.</p>
+</div>
+
+<h3>3.3 Per-Brand Aggregates</h3>
+<p>Function: <code>computeBrandSummary(branchRows)</code></p>
+
+<pre>
+For each brand:
+  totalBranches  = count of branches with this brand
+  totalReviews3m = SUM(branch.totalReviews3m)
+  avgRating3m    = SUM(branch.avgRating3m &times; branch.totalReviews3m)
+                 / SUM(branch.totalReviews3m)
+</pre>
+
+<div class="callout green">
+  <p><strong>Key formula &mdash; Weighted Average Rating:</strong><br>
+  <code>avgRating = &Sigma;(branch_avg &times; branch_reviews) / &Sigma;(branch_reviews)</code><br><br>
+  This prevents a branch with 1 review (5&star;) from distorting the brand mean vs a branch with 500 reviews (4.2&star;). This formula is used consistently in the analyzer, database insert, AND dashboard rendering.</p>
+</div>
+
+<!-- ═══════════════════ STAGE 3: DB INSERT ═══════════════════ -->
+<h2 class="page-break">4. Stage 3 &mdash; Database Insert</h2>
+<p><strong>File:</strong> <code>lib/job-runner.ts</code> &rarr; <code>pushDataToClientDb()</code></p>
+<p>After analysis, 4 tables are populated in the client's Supabase database:</p>
+
+<h3>4.1 <code>branches</code> table</h3>
+<table>
+  <tr><th>Column</th><th>Source</th></tr>
+  <tr><td><code>brand</code></td><td><code>detectBrand(place)</code> &mdash; <code>__searchBrand</code> first, then keyword match</td></tr>
+  <tr><td><code>branch_name</code></td><td><code>place.title</code></td></tr>
+  <tr><td><code>stars</code></td><td><code>place.rating</code> OR avg of review stars (fallback if Google didn't show a rating)</td></tr>
+  <tr><td><code>reviews_count</code></td><td><code>place.reviewsCount</code> (Google's number) OR <code>reviews.length</code></td></tr>
+  <tr><td><code>is_target</code></td><td><code>true</code> if branch title is in the target places set</td></tr>
+  <tr><td><code>popular_times</code></td><td><code>place.popularTimes.grid</code> &mdash; 7&times;24 busyness object</td></tr>
+</table>
+
+<h3>4.2 <code>reviews</code> table</h3>
+<table>
+  <tr><th>Column</th><th>Source</th></tr>
+  <tr><td><code>branch_id</code></td><td>Linked by <code>brand|branch_name</code> key to inserted branch UUID</td></tr>
+  <tr><td><code>rating</code></td><td><code>review.stars</code></td></tr>
+  <tr><td><code>published_at</code></td><td><code>review.publishedAtDate</code> (ISO timestamp)</td></tr>
+  <tr><td><code>text</code></td><td><code>review.text</code></td></tr>
+</table>
+<p>Inserted in chunks of 500 to avoid Supabase request size limits.</p>
+
+<h3>4.3 <code>analyses</code> table (per-brand summary)</h3>
+<table>
+  <tr><th>Column</th><th>Source</th></tr>
+  <tr><td><code>brand</code></td><td>From <code>analysis.brandRows</code></td></tr>
+  <tr><td><code>avg_rating_3m</code></td><td><code>brandRow.avgRating3m</code> (weighted average)</td></tr>
+  <tr><td><code>total_reviews_3m</code></td><td><code>brandRow.totalReviews3m</code></td></tr>
+  <tr><td><code>star_5_count..star_1_count</code></td><td>Sum of all branches' star histograms for this brand</td></tr>
+</table>
+
+<h3>4.4 <code>branch_analytics</code> table (main dashboard source)</h3>
+<p>This is the <strong>primary table</strong> the dashboard reads from. It mirrors the Excel "Branch Wise Data" sheet exactly.</p>
+<table>
+  <tr><th>Column</th><th>Source</th><th>Description</th></tr>
+  <tr><td><code>avg_rating_period</code></td><td><code>branchRow.avgRating3m</code></td><td>Average star rating of reviews in the analysis window</td></tr>
+  <tr><td><code>total_reviews_period</code></td><td><code>branchRow.totalReviews3m</code></td><td>Total review count in window</td></tr>
+  <tr><td><code>month_1_reviews</code></td><td><code>branchRow.month1Count</code></td><td>Reviews in newest third of window</td></tr>
+  <tr><td><code>month_1_avg_rating</code></td><td><code>branchRow.month1Avg</code></td><td>Avg rating for month 1</td></tr>
+  <tr><td><code>month_2_*</code></td><td><code>branchRow.month2*</code></td><td>Middle third of window</td></tr>
+  <tr><td><code>month_3_*</code></td><td><code>branchRow.month3*</code></td><td>Oldest third of window</td></tr>
+  <tr><td><code>star_5..star_1_count</code></td><td><code>branchRow.stars5..1</code></td><td>Star histogram for this branch</td></tr>
+  <tr><td><code>popular_times_grid</code></td><td><code>pt.grid</code></td><td>JSON: <code>{SUNDAY:[0-100 &times;24], ...}</code></td></tr>
+  <tr><td><code>peak_day/hour/pct</code></td><td><code>pt.peakDay/Hour/Busyness</code></td><td>Day &amp; hour with highest busyness</td></tr>
+  <tr><td><code>date_start / date_end</code></td><td>Job parameters</td><td>Analysis window boundaries</td></tr>
+</table>
+
+<!-- ═══════════════════ STAGE 4: DASHBOARD ═══════════════════ -->
+<h2 class="page-break">5. Stage 4 &mdash; Dashboard Query &amp; Rendering</h2>
+
+<h3>5.1 Server-Side Query</h3>
+<p><strong>File:</strong> <code>app/dashboard/page.tsx</code></p>
+<pre>
+// 1. Find latest succeeded job for the logged-in user
+const latestJob = await admin.from('jobs')
+  .select('id, target_name, competitors, date_start, date_end, ...')
+  .eq('user_id', user.id)
+  .eq('status', 'succeeded')
+  .order('finished_at', { ascending: false })
+  .limit(1);
+
+// 2. Fetch all analytics + analyses for that job
+const analytics  = await cdb.from('branch_analytics').select('*').eq('job_id', jobId);
+const analyses   = await cdb.from('analyses').select('*').eq('job_id', jobId);
+</pre>
+
+<h3>5.2 Client-Side Aggregation</h3>
+<p><strong>File:</strong> <code>app/dashboard/dashboard-view.tsx</code> &rarr; <code>buildBrandSummaries()</code></p>
+<p>Re-aggregates <code>branch_analytics</code> rows into brand-level summaries:</p>
+
+<pre>
+For each brand (grouped from branch_analytics rows):
+  branches     = COUNT(rows)
+  totalReviews = SUM(total_reviews_period)
+  avgRating    = SUM(avg_rating_period &times; total_reviews_period)
+               / SUM(total_reviews_period)                  // weighted avg
+  stars[5..1]  = SUM(star_5_count), SUM(star_4_count), ...
+  monthly[0]   = {
+    reviews: SUM(month_1_reviews),
+    avg:     SUM(month_1_avg_rating &times; month_1_reviews)
+           / SUM(month_1_reviews)                           // weighted avg
+  }
+  // same for monthly[1] (month_2) and monthly[2] (month_3)
+</pre>
+
+<!-- ═══════════════════ CHART REFERENCE ═══════════════════ -->
+<h2 class="page-break">6. Chart Data Reference</h2>
+<p>Every chart in the dashboard is rendered as pure SVG (zero external libraries). Below is what each chart shows and exactly how its data is derived.</p>
+
+<h3>Overview Tab</h3>
+<table>
+  <tr><th>Chart</th><th>Data Source</th><th>Calculation</th></tr>
+  <tr>
+    <td><strong>KPI: Target Rating</strong></td>
+    <td><code>targetSummary.avgRating</code></td>
+    <td>Weighted avg of all target brand branches</td>
+  </tr>
+  <tr>
+    <td><strong>KPI: Competitors Avg</strong></td>
+    <td><code>compSummaries[].avgRating</code></td>
+    <td>Simple average of competitor brand weighted averages</td>
+  </tr>
+  <tr>
+    <td><strong>KPI: Rating Gap</strong></td>
+    <td>Target &minus; Competitors avg</td>
+    <td>Direct subtraction; green if positive, red if negative</td>
+  </tr>
+  <tr>
+    <td><strong>Donut Charts</strong></td>
+    <td><code>brandSummary.stars[0..4]</code></td>
+    <td>Sum of star counts across all branches for that brand. Slice angle = <code>(count / total) &times; 360&deg;</code>. Center text = overall avg.</td>
+  </tr>
+  <tr>
+    <td><strong>Rating Trend (Line)</strong></td>
+    <td><code>monthly[].avg</code> (reversed: oldest &rarr; newest)</td>
+    <td>Weighted avg rating per time period. One line per brand, Y axis = rating scale.</td>
+  </tr>
+  <tr>
+    <td><strong>Review Volume (Bars)</strong></td>
+    <td><code>monthly[].reviews</code> (reversed)</td>
+    <td>Sum of reviews per period. Grouped bars &mdash; one group per period, one bar per brand.</td>
+  </tr>
+  <tr>
+    <td><strong>Branch Rating Scatter</strong></td>
+    <td>Each <code>branch_analytics</code> row</td>
+    <td>Chip color = rating range (green 4.5+, red &lt;3). Chip opacity = <code>min(1, reviews / 20)</code>.</td>
+  </tr>
+  <tr>
+    <td><strong>City Table</strong></td>
+    <td>Grouped by <code>city</code> field</td>
+    <td>Same weighted avg per city per brand. Sorted by total branches descending.</td>
+  </tr>
+</table>
+
+<h3>Rankings Tab</h3>
+<table>
+  <tr><th>Chart</th><th>Data Source</th><th>Calculation</th></tr>
+  <tr>
+    <td><strong>Top 15 / Bottom 15 Bars</strong></td>
+    <td><code>branch_analytics</code> sorted by <code>avg_rating_period</code></td>
+    <td>Horizontal bar length = <code>rating / 5 &times; barWidth</code>. Color = brand color.</td>
+  </tr>
+  <tr>
+    <td><strong>Rankings Table</strong></td>
+    <td>Same sorted list</td>
+    <td>Rank number, green highlight for top 10, red for bottom 10.</td>
+  </tr>
+</table>
+
+<h3>Popular Times Tab</h3>
+<table>
+  <tr><th>Chart</th><th>Data Source</th><th>Calculation</th></tr>
+  <tr>
+    <td><strong>Hourly Busyness (Line overlay)</strong></td>
+    <td><code>popular_times_grid</code> from all branches</td>
+    <td>For each hour (0&ndash;23): average across all 7 days AND all branches of that brand. One line per brand.</td>
+  </tr>
+  <tr>
+    <td><strong>Peak Day (Grouped bars)</strong></td>
+    <td><code>popular_times_grid</code></td>
+    <td>For each day: <code>max(hourly values)</code> per branch, then averaged across branches per brand.</td>
+  </tr>
+  <tr>
+    <td><strong>Heatmap (per branch)</strong></td>
+    <td>Single branch's <code>popular_times_grid</code></td>
+    <td>7 rows (days) &times; 24 cols (hours). Cell color intensity = <code>value / 100</code>.</td>
+  </tr>
+  <tr>
+    <td><strong>Peak Summary Bars</strong></td>
+    <td><code>peak_busyness_pct</code> per branch</td>
+    <td>Averaged across all branches of a brand. Most common peak day shown.</td>
+  </tr>
+</table>
+
+<!-- ═══════════════════ KEY FORMULA ═══════════════════ -->
+<h2>7. Key Formula Used Everywhere</h2>
+
+<div class="callout green">
+  <p><strong>Weighted Average Rating</strong></p>
+  <p style="font-size: 1.1rem; text-align: center; margin: 0.8rem 0; color: #1e293b; font-weight: 800;">
+    avgRating = &Sigma;(branch<sub>i</sub>.avg &times; branch<sub>i</sub>.reviews) &divide; &Sigma;(branch<sub>i</sub>.reviews)
+  </p>
+  <p>This formula is consistent across all 3 layers:</p>
+  <p>&bull; <code>analyzer.js</code> &rarr; <code>computeBrandSummary()</code><br>
+     &bull; <code>job-runner.ts</code> &rarr; <code>pushDataToClientDb()</code> (stored in <code>analyses.avg_rating_3m</code>)<br>
+     &bull; <code>dashboard-view.tsx</code> &rarr; <code>buildBrandSummaries()</code></p>
+  <p style="margin-top: 0.5rem;"><strong>Why weighted?</strong> A branch with 1 review at 5&star; should not outweigh a branch with 500 reviews at 4.2&star;. Weighting by review count ensures the brand average reflects actual customer volume.</p>
+</div>
+
+<!-- ═══════════════════ DB SCHEMA ═══════════════════ -->
+<h2 class="page-break">8. Database Schema Summary</h2>
+
+<h3>8.1 Admin Database (shared)</h3>
+<table>
+  <tr><th>Table</th><th>Key Columns</th><th>Purpose</th></tr>
+  <tr><td><code>jobs</code></td><td>id, user_id, target_name, competitors[], status, progress_pct</td><td>Job queue &amp; tracking</td></tr>
+  <tr><td><code>job_logs</code></td><td>job_id, level, message, created_at</td><td>Real-time log stream</td></tr>
+  <tr><td><code>schedules</code></td><td>target_name, competitors[], day_of_month</td><td>Monthly recurring jobs</td></tr>
+  <tr><td><code>notifications</code></td><td>user_id, job_id, kind, title</td><td>Bell icon updates</td></tr>
+  <tr><td><code>app_settings</code></td><td>gmail_*, gmb_*, puppeteer_*</td><td>System config (singleton)</td></tr>
+</table>
+
+<h3>8.2 Client Database (per-user)</h3>
+<table>
+  <tr><th>Table</th><th>Key Columns</th><th>Purpose</th></tr>
+  <tr><td><code>branches</code></td><td>job_id, brand, branch_name, stars, is_target</td><td>Discovered branches</td></tr>
+  <tr><td><code>reviews</code></td><td>branch_id, rating, text, published_at</td><td>Individual reviews</td></tr>
+  <tr><td><code>analyses</code></td><td>job_id, brand, avg_rating_3m, star_*_count</td><td>Per-brand aggregates</td></tr>
+  <tr><td><code>branch_analytics</code></td><td>All 30+ columns (see Section 4.4)</td><td><strong>Main dashboard source</strong></td></tr>
+  <tr><td><code>reports</code></td><td>job_id, excel_url, report_md_url</td><td>File download links</td></tr>
+  <tr><td><code>job_history</code></td><td>job_id, status, duration_sec</td><td>Mirror of admin jobs</td></tr>
+</table>
+
+<!-- ═══════════════════ FOOTER ═══════════════════ -->
+<div style="margin-top: 4rem; padding-top: 1.5rem; border-top: 2px solid #E2E8F0; text-align: center; color: #94a3b8; font-size: 0.8rem;">
+  <p><strong>Anoosh SaaS</strong> &mdash; Dashboard Data Flow Documentation</p>
+  <p>This document describes the data pipeline as of the current codebase. Schema and calculations may evolve.</p>
+</div>
+
+</body>
+</html>

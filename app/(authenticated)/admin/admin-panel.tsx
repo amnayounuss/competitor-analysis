@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import OverviewTab from './tab-overview';
 import GmailTab    from './tab-gmail';
 import GmbTab      from './tab-gmb';
@@ -9,7 +10,10 @@ import UsersTab    from './tab-users';
 type Tab = 'overview' | 'gmail' | 'gmb' | 'worker' | 'users';
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState<Tab>('overview');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const currentTab = (searchParams.get('tab') as Tab) || 'overview';
+  
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading]   = useState(true);
 
@@ -21,6 +25,10 @@ export default function AdminPanel() {
     setLoading(false);
   }
   useEffect(() => { loadSettings(); }, []);
+
+  const setTab = (t: Tab) => {
+    router.push(`/admin?tab=${t}`);
+  };
 
   return (
     <div className="space-y-8">
@@ -36,7 +44,7 @@ export default function AdminPanel() {
             key={t} 
             onClick={() => setTab(t as Tab)}
             className={`px-5 py-2.5 text-xs font-bold rounded-xl transition-all uppercase tracking-widest
-              ${tab === t 
+              ${currentTab === t 
                 ? 'bg-white text-indigo-600 shadow-md shadow-indigo-600/5 ring-1 ring-slate-200/50' 
                 : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
           >
@@ -53,11 +61,11 @@ export default function AdminPanel() {
       ) : (
         <div className="modern-card p-10">
           <div className="max-w-4xl">
-            {tab === 'overview' && <OverviewTab />}
-            {tab === 'users'    && <UsersTab />}
-            {tab === 'gmail'    && <GmailTab  settings={settings} reload={loadSettings} />}
-            {tab === 'gmb'      && <GmbTab    settings={settings} reload={loadSettings} />}
-            {tab === 'worker'   && <WorkerTab settings={settings} reload={loadSettings} />}
+            {currentTab === 'overview' && <OverviewTab />}
+            {currentTab === 'users'    && <UsersTab />}
+            {currentTab === 'gmail'    && <GmailTab  settings={settings} reload={loadSettings} />}
+            {currentTab === 'gmb'      && <GmbTab    settings={settings} reload={loadSettings} />}
+            {currentTab === 'worker'   && <WorkerTab settings={settings} reload={loadSettings} />}
           </div>
         </div>
       )}

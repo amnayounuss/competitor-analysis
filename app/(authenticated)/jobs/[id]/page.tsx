@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { serverClient, adminClient } from '@/lib/supabase';
 import { getClientDbCreds, clientDbClient } from '@/lib/client-db';
 import LiveJobView from './live-job-view';
-import DashboardView from '@/app/dashboard/dashboard-view';
+import DashboardView from '@/app/(authenticated)/dashboard/dashboard-view';
 
 export const dynamic = 'force-dynamic';
 

@@ -1,85 +1,24 @@
 /**
- * Gmail sender via OAuth2.
- *
- * We exchange the saved refresh_token for a short-lived access_token and use it
- * with nodemailer's Gmail OAuth2 flow. Refresh tokens last ~6 months in test mode
- * and don't expire when the OAuth app is in "production" mode (Google's terms).
+ * SMTP sender utility.
  */
 import nodemailer from 'nodemailer';
 import { getSettings } from './settings';
 
-interface AccessTokenCache {
-  token: string;
-  expiresAt: number;
-  forKey: string;
-}
-let accessCache: AccessTokenCache | null = null;
-
-/**
- * Refresh-token → access-token exchange.
- * Cached for the lifetime of the access token (1 hour) minus 60s buffer.
- */
-async function getAccessToken(
-  clientId: string,
-  clientSecret: string,
-  refreshToken: string,
-): Promise<string> {
-  const cacheKey = `${clientId}:${refreshToken}`;
-  if (accessCache && accessCache.forKey === cacheKey && Date.now() < accessCache.expiresAt) {
-    return accessCache.token;
-  }
-
-  const params = new URLSearchParams({
-    client_id:     clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-    grant_type:    'refresh_token',
-  });
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gmail OAuth refresh failed (${res.status}): ${errText}`);
-  }
-
-  const json = await res.json();
-  if (!json.access_token) throw new Error('Gmail OAuth response missing access_token');
-
-  accessCache = {
-    token: json.access_token,
-    expiresAt: Date.now() + ((json.expires_in || 3600) - 60) * 1000,
-    forKey: cacheKey,
-  };
-  return json.access_token;
-}
-
 async function transporter(): Promise<nodemailer.Transporter> {
   const s = await getSettings();
-  if (!s.gmail_user || !s.gmail_oauth_client_id || !s.gmail_oauth_client_secret || !s.gmail_refresh_token) {
-    throw new Error('Gmail OAuth not configured. Visit /admin → Gmail to set credentials.');
+  if (!s.smtp_host || !s.smtp_user || !s.smtp_pass) {
+    throw new Error('SMTP not configured. Visit /admin → SMTP to set credentials.');
   }
 
-  const accessToken = await getAccessToken(
-    s.gmail_oauth_client_id,
-    s.gmail_oauth_client_secret,
-    s.gmail_refresh_token,
-  );
-
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: s.smtp_host,
+    port: s.smtp_port,
+    secure: s.smtp_secure, // true for 465, false for other ports
     auth: {
-      type: 'OAuth2',
-      user:         s.gmail_user,
-      clientId:     s.gmail_oauth_client_id,
-      clientSecret: s.gmail_oauth_client_secret,
-      refreshToken: s.gmail_refresh_token,
-      accessToken,
+      user: s.smtp_user,
+      pass: s.smtp_pass,
     },
-  } as any);
+  });
 }
 
 export interface ReportEmailParams {
@@ -115,8 +54,10 @@ export async function sendReportEmail(p: ReportEmailParams) {
     </div>`;
 
   await tx.sendMail({
-    from: `"${s.gmail_from_name}" <${s.gmail_user}>`,
-    to: p.to, subject, html,
+    from: `"${s.smtp_from_name}" <${s.smtp_from_email || s.smtp_user}>`,
+    to: p.to, 
+    subject, 
+    html,
     attachments: [
       { filename: 'analysis.xlsx', path: p.excelPath },
       { filename: 'report.md',     path: p.reportPath },
@@ -128,7 +69,7 @@ export async function sendFailureEmail(to: string, targetName: string, errorMess
   const s  = await getSettings();
   const tx = await transporter();
   await tx.sendMail({
-    from: `"${s.gmail_from_name}" <${s.gmail_user}>`,
+    from: `"${s.smtp_from_name}" <${s.smtp_from_email || s.smtp_user}>`,
     to,
     subject: `Analysis failed — ${targetName}`,
     html: `<div style="font-family:Arial,sans-serif;max-width:600px">
@@ -143,10 +84,10 @@ export async function sendTestEmail(to: string) {
   const s  = await getSettings();
   const tx = await transporter();
   await tx.sendMail({
-    from: `"${s.gmail_from_name}" <${s.gmail_user}>`,
+    from: `"${s.smtp_from_name}" <${s.smtp_from_email || s.smtp_user}>`,
     to,
     subject: 'Test email — Reviews Analytics',
-    html: '<p>If you can read this, your Gmail OAuth is working.</p>',
+    html: '<p>If you can read this, your SMTP configuration is working correctly.</p>',
   });
 }
 

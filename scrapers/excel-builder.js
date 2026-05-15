@@ -37,10 +37,10 @@ function buildBranchSheet(branchRows) {
     "Brand", "Branch Name", "Address", "Google Maps Link",
     "Business Hours", "Phone",
     "Peak Time", "Busy Hours Summary",
-    "Avg Rating (Last 3 Months)", "Total Reviews (Last 3 Months)",
-    "Month 1 Reviews (0-30d)",  "Month 1 Avg Rating",
-    "Month 2 Reviews (30-60d)", "Month 2 Avg Rating",
-    "Month 3 Reviews (60-90d)", "Month 3 Avg Rating",
+    "Average Rating (Selected Period)", "Total Reviews (Selected Period)",
+    "Period 1 Reviews (Newest)",  "Period 1 Avg Rating",
+    "Period 2 Reviews (Middle)", "Period 2 Avg Rating",
+    "Period 3 Reviews (Oldest)", "Period 3 Avg Rating",
     "5⭐ Count", "4⭐ Count", "3⭐ Count", "2⭐ Count", "1⭐ Count",
   ];
 
@@ -58,14 +58,14 @@ function buildBranchSheet(branchRows) {
       "Phone":                         r.phone || "",
       "Peak Time":                     peakLabel,
       "Busy Hours Summary":            pt.summary || "",
-      "Avg Rating (Last 3 Months)":    r.avgRating3m !== null ? r.avgRating3m : "N/A",
-      "Total Reviews (Last 3 Months)": r.totalReviews3m,
-      "Month 1 Reviews (0-30d)":       r.month1Count,
-      "Month 1 Avg Rating":            r.month1Avg !== null ? r.month1Avg : "N/A",
-      "Month 2 Reviews (30-60d)":      r.month2Count,
-      "Month 2 Avg Rating":            r.month2Avg !== null ? r.month2Avg : "N/A",
-      "Month 3 Reviews (60-90d)":      r.month3Count,
-      "Month 3 Avg Rating":            r.month3Avg !== null ? r.month3Avg : "N/A",
+      "Average Rating (Selected Period)":    r.avgRatingPeriod !== null ? r.avgRatingPeriod : "N/A",
+      "Total Reviews (Selected Period)": r.totalReviewsPeriod,
+      "Period 1 Reviews (Newest)":       r.period1Count,
+      "Period 1 Avg Rating":            r.period1Avg !== null ? r.period1Avg : "N/A",
+      "Period 2 Reviews (Middle)":      r.period2Count,
+      "Period 2 Avg Rating":            r.period2Avg !== null ? r.period2Avg : "N/A",
+      "Period 3 Reviews (Oldest)":      r.period3Count,
+      "Period 3 Avg Rating":            r.period3Avg !== null ? r.period3Avg : "N/A",
       "5⭐ Count":                      r.stars5,
       "4⭐ Count":                      r.stars4,
       "3⭐ Count":                      r.stars3,
@@ -91,9 +91,9 @@ function buildBranchSheet(branchRows) {
     { wch: 40 },  // Busy Hours Summary
     { wch: 14 },  // Avg Rating
     { wch: 14 },  // Total Reviews
-    { wch: 16 }, { wch: 14 },  // Month 1
-    { wch: 16 }, { wch: 14 },  // Month 2
-    { wch: 16 }, { wch: 14 },  // Month 3
+    { wch: 16 }, { wch: 14 },  // Period 1
+    { wch: 16 }, { wch: 14 },  // Period 2
+    { wch: 16 }, { wch: 14 },  // Period 3
     { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 9 },  // stars
   ];
 
@@ -107,15 +107,15 @@ function buildBranchSheet(branchRows) {
 function buildBrandSheet(brandRows) {
   const headers = [
     "Brand",
-    "Average Rating (3 months)",
-    "Total Reviews (3 months)",
+    "Average Rating (Period)",
+    "Total Reviews (Period)",
     "Total Branches",
   ];
 
   const data = brandRows.map((b) => ({
     "Brand":                     b.brand,
-    "Average Rating (3 months)": b.avgRating3m !== null ? b.avgRating3m : "N/A",
-    "Total Reviews (3 months)":  b.totalReviews3m,
+    "Average Rating (Period)": b.avgRatingPeriod !== null ? b.avgRatingPeriod : "N/A",
+    "Total Reviews (Period)":  b.totalReviewsPeriod,
     "Total Branches":            b.totalBranches,
   }));
 
@@ -128,15 +128,15 @@ function buildBrandSheet(brandRows) {
 
 function buildRankingsSheet(branchRows) {
   const ranked = [...branchRows]
-    .filter((r) => r.totalReviews3m > 0 && r.avgRating3m !== null)
-    .sort((a, b) => b.avgRating3m - a.avgRating3m || b.totalReviews3m - a.totalReviews3m)
+    .filter((r) => r.totalReviewsPeriod > 0 && r.avgRatingPeriod !== null)
+    .sort((a, b) => b.avgRatingPeriod - a.avgRatingPeriod || b.totalReviewsPeriod - a.totalReviewsPeriod)
     .map((r, i) => ({
       "Rank":        i + 1,
       "Brand":       r.brand,
       "Branch":      r.branchName,
       "Address":     r.address || r.city || "",
-      "Avg Rating":  r.avgRating3m,
-      "Reviews":     r.totalReviews3m,
+      "Avg Rating":  r.avgRatingPeriod,
+      "Reviews":     r.totalReviewsPeriod,
     }));
 
   const headers = ["Rank", "Brand", "Branch", "Address", "Avg Rating", "Reviews"];
@@ -155,7 +155,7 @@ function buildAllReviewsSheet(branchRows) {
         "Brand":      b.brand,
         "Branch":     b.branchName,
         "Date":       r.date,                // YYYY-MM-DD
-        "Month":      r.monthBucket,         // Month 1/2/3 label
+        "Period":     r.monthBucket,         // Period 1/2/3 label
         "Rating":     r.rating != null ? r.rating : "",
         "Review Text": r.text,
       });
@@ -168,7 +168,7 @@ function buildAllReviewsSheet(branchRows) {
     (b.Date.localeCompare(a.Date))
   );
 
-  const headers = ["Brand", "Branch", "Date", "Month", "Rating", "Review Text"];
+  const headers = ["Brand", "Branch", "Date", "Period", "Rating", "Review Text"];
   const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
   ws["!cols"] = [
     { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 22 }, { wch: 8 }, { wch: 80 },
@@ -239,13 +239,13 @@ function buildPopularTimesSheet(branchRows) {
 
 function buildDashboardSheet(brandRows, branchRows, bestBranch, worstBranch) {
   const totalBranches = branchRows.length;
-  const totalReviews  = branchRows.reduce((s, r) => s + r.totalReviews3m, 0);
+  const totalReviews  = branchRows.reduce((s, r) => s + r.totalReviewsPeriod, 0);
   const totalPTCovered = branchRows.filter((r) => r.popularTimes && r.popularTimes.available).length;
 
   const target = config.targetName || "Target";
   const windowLabel = (config.DATE_START && config.DATE_END)
     ? `Analysis window: ${config.DATE_START} → ${config.DATE_END}`
-    : `Analysis window: last ${config.LOOKBACK_MONTHS} months`;
+    : `Analysis window: Dynamic Analysis Period`;
   const rows = [
     [`${target} Competitor Analysis — Dashboard`],
     [windowLabel],
@@ -259,15 +259,15 @@ function buildDashboardSheet(brandRows, branchRows, bestBranch, worstBranch) {
     ["Brand",   "Avg Rating", "Total Reviews", "Branches"],
     ...brandRows.map((b) => [
       b.brand,
-      b.avgRating3m !== null ? b.avgRating3m : "N/A",
-      b.totalReviews3m,
+      b.avgRatingPeriod !== null ? b.avgRatingPeriod : "N/A",
+      b.totalReviewsPeriod,
       b.totalBranches,
     ]),
     [],
     ["Best branch",
-      bestBranch ? `${bestBranch.branchName} (${bestBranch.brand}, ${bestBranch.avgRating3m}⭐, ${bestBranch.totalReviews3m} reviews)` : "N/A"],
+      bestBranch ? `${bestBranch.branchName} (${bestBranch.brand}, ${bestBranch.avgRatingPeriod}⭐, ${bestBranch.totalReviewsPeriod} reviews)` : "N/A"],
     ["Worst branch",
-      worstBranch ? `${worstBranch.branchName} (${worstBranch.brand}, ${worstBranch.avgRating3m}⭐, ${worstBranch.totalReviews3m} reviews)` : "N/A"],
+      worstBranch ? `${worstBranch.branchName} (${worstBranch.brand}, ${worstBranch.avgRatingPeriod}⭐, ${worstBranch.totalReviewsPeriod} reviews)` : "N/A"],
   ];
 
   const ws = XLSX.utils.aoa_to_sheet(rows);

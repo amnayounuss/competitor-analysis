@@ -27,7 +27,7 @@ create table if not exists public.branches (
 create index if not exists branches_job_idx   on public.branches (job_id);
 create index if not exists branches_brand_idx on public.branches (brand);
 
--- ── Reviews (last 3 months, per branch) ─────────────────────
+-- ── Reviews (per branch) ─────────────────────────────────────
 create table if not exists public.reviews (
   id            bigserial   primary key,
   job_id        uuid        not null,
@@ -50,8 +50,8 @@ create table if not exists public.analyses (
   job_id            uuid        not null,
   brand             text        not null,
   branch_count      int,
-  total_reviews_3m  int,
-  avg_rating_3m     numeric(3,2),
+  total_reviews_period  int,
+  avg_rating_period     numeric(3,2),
   star_5_count      int default 0,
   star_4_count      int default 0,
   star_3_count      int default 0,
@@ -113,12 +113,12 @@ create table if not exists public.branch_analytics (
   avg_rating_period       numeric(3,2),
   total_reviews_period    int          not null default 0,
 
-  month_1_reviews         int          not null default 0,
-  month_1_avg_rating      numeric(3,2),
-  month_2_reviews         int          not null default 0,
-  month_2_avg_rating      numeric(3,2),
-  month_3_reviews         int          not null default 0,
-  month_3_avg_rating      numeric(3,2),
+  period_1_reviews         int          not null default 0,
+  period_1_avg_rating      numeric(3,2),
+  period_2_reviews         int          not null default 0,
+  period_2_avg_rating      numeric(3,2),
+  period_3_reviews         int          not null default 0,
+  period_3_avg_rating      numeric(3,2),
 
   star_5_count            int          not null default 0,
   star_4_count            int          not null default 0,

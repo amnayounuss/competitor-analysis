@@ -22,13 +22,17 @@ export async function GET() {
 
   return NextResponse.json({
     settings: {
-      gmail_user:                 data.gmail_user || '',
-      gmail_from_name:            data.gmail_from_name || '',
-      gmail_oauth_client_id:      data.gmail_oauth_client_id || '',
-      gmail_oauth_client_secret:  mask(data.gmail_oauth_client_secret),
-      gmail_refresh_token:        mask(data.gmail_refresh_token),
+      smtp_host:                  data.smtp_host || '',
+      smtp_port:                  data.smtp_port,
+      smtp_user:                  data.smtp_user || '',
+      smtp_pass:                  mask(data.smtp_pass),
+      smtp_secure:                data.smtp_secure,
+      smtp_from_name:             data.smtp_from_name || '',
+      smtp_from_email:            data.smtp_from_email || '',
+      
       gmb_oauth_client_id:        data.gmb_oauth_client_id || '',
       gmb_oauth_client_secret:    mask(data.gmb_oauth_client_secret),
+      
       worker_poll_ms:             data.worker_poll_ms,
       puppeteer_headless:         data.puppeteer_headless,
       signup_allowed:             data.signup_allowed,
@@ -39,19 +43,24 @@ export async function GET() {
 }
 
 const UpdateSchema = z.object({
-  gmail_user:                z.string().email().optional(),
-  gmail_from_name:           z.string().min(1).optional(),
-  gmail_oauth_client_id:     z.string().min(10).optional(),
-  gmail_oauth_client_secret: z.string().min(10).optional(),
-  gmail_refresh_token:       z.string().min(20).optional(),
+  smtp_host:                 z.string().min(1).optional(),
+  smtp_port:                 z.number().int().optional(),
+  smtp_user:                 z.string().min(1).optional(),
+  smtp_pass:                 z.string().min(1).optional(),
+  smtp_secure:               z.boolean().optional(),
+  smtp_from_name:            z.string().min(1).optional(),
+  smtp_from_email:           z.string().email().or(z.literal('')).optional(),
+
   gmb_oauth_client_id:       z.string().min(10).optional(),
   gmb_oauth_client_secret:   z.string().min(10).optional(),
+  
   worker_poll_ms:            z.number().int().min(1000).max(60000).optional(),
   puppeteer_headless:        z.boolean().optional(),
   signup_allowed:            z.boolean().optional(),
+  setup_completed:           z.boolean().optional(),
 });
 
-export async function PATCH(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const auth = await requireAdmin();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -65,6 +74,11 @@ export async function PATCH(req: NextRequest) {
   }
 
   const update: Record<string, unknown> = { ...parsed.data };
+  
+  // Don't overwrite with masks
+  if (typeof update.smtp_pass === 'string' && update.smtp_pass.includes('•')) delete update.smtp_pass;
+  if (typeof update.gmb_oauth_client_secret === 'string' && update.gmb_oauth_client_secret.includes('•')) delete update.gmb_oauth_client_secret;
+
   update.updated_at = new Date().toISOString();
   update.updated_by = auth.user.id;
 

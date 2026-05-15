@@ -1,24 +1,21 @@
 /**
  * App settings — single source of truth for runtime config.
  *
- * Two separate OAuth credentials:
- *   1. Gmail (sender)  — admin's own Google project for sending mail
- *   2. GMB (Business Profile API) — separate Google project; clients provide
- *      their own refresh tokens at job-submit time
- *
  * All read from DB (set via /setup wizard or /admin), with optional .env fallback.
  */
 import { adminClient } from './supabase';
 
 export interface AppSettings {
-  // Gmail OAuth (sender)
-  gmail_user:                 string;
-  gmail_from_name:            string;
-  gmail_oauth_client_id:      string;
-  gmail_oauth_client_secret:  string;
-  gmail_refresh_token:        string;
+  // SMTP Config
+  smtp_host:                  string;
+  smtp_port:                  number;
+  smtp_user:                  string;
+  smtp_pass:                  string;
+  smtp_secure:                boolean;
+  smtp_from_name:             string;
+  smtp_from_email:            string;
 
-  // GMB OAuth
+  // GMB OAuth (for clients)
   gmb_oauth_client_id:        string;
   gmb_oauth_client_secret:    string;
 
@@ -44,13 +41,17 @@ export async function getSettings(forceFresh = false): Promise<AppSettings> {
   }
 
   const merged: AppSettings = {
-    gmail_user:                 data?.gmail_user                 || process.env.GMAIL_USER                 || '',
-    gmail_from_name:            data?.gmail_from_name            || process.env.GMAIL_FROM_NAME            || 'Reports',
-    gmail_oauth_client_id:      data?.gmail_oauth_client_id      || process.env.GMAIL_OAUTH_CLIENT_ID      || '',
-    gmail_oauth_client_secret:  data?.gmail_oauth_client_secret  || process.env.GMAIL_OAUTH_CLIENT_SECRET  || '',
-    gmail_refresh_token:        data?.gmail_refresh_token        || process.env.GMAIL_REFRESH_TOKEN        || '',
+    smtp_host:                  data?.smtp_host                  || process.env.SMTP_HOST                  || '',
+    smtp_port:                  data?.smtp_port                  ?? parseInt(process.env.SMTP_PORT || '587', 10),
+    smtp_user:                  data?.smtp_user                  || process.env.SMTP_USER                  || '',
+    smtp_pass:                  data?.smtp_pass                  || process.env.SMTP_PASS                  || '',
+    smtp_secure:                data?.smtp_secure                ?? (process.env.SMTP_SECURE === 'true'),
+    smtp_from_name:             data?.smtp_from_name             || process.env.SMTP_FROM_NAME             || 'Reports',
+    smtp_from_email:            data?.smtp_from_email            || process.env.SMTP_FROM_EMAIL            || '',
+
     gmb_oauth_client_id:        data?.gmb_oauth_client_id        || process.env.GMB_OAUTH_CLIENT_ID        || '',
     gmb_oauth_client_secret:    data?.gmb_oauth_client_secret    || process.env.GMB_OAUTH_CLIENT_SECRET    || '',
+    
     worker_poll_ms:             data?.worker_poll_ms             ?? parseInt(process.env.WORKER_POLL_INTERVAL_MS || '5000', 10),
     puppeteer_headless:         data?.puppeteer_headless         ?? (process.env.PUPPETEER_HEADLESS !== 'false'),
     signup_allowed:             data?.signup_allowed             ?? true,
@@ -70,7 +71,7 @@ export function clearSettingsCache() {
 export async function isSetupCompleted(): Promise<boolean> {
   const s = await getSettings();
   return s.setup_completed
-    && !!s.gmail_user
-    && !!s.gmail_refresh_token
+    && !!s.smtp_host
+    && !!s.smtp_user
     && !!s.gmb_oauth_client_id;
 }

@@ -15,12 +15,14 @@ export default function SetupWizard() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminName, setAdminName] = useState('');
 
-  // Step 2 — Gmail (sender)
-  const [gmailUser, setGmailUser] = useState('');
-  const [gmailFromName, setGmailFromName] = useState('Reviews Analytics');
-  const [gmailClientId, setGmailClientId] = useState('');
-  const [gmailClientSecret, setGmailClientSecret] = useState('');
-  const [gmailRefreshToken, setGmailRefreshToken] = useState('');
+  // Step 2 — SMTP
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [smtpFromName, setSmtpFromName] = useState('Reviews Analytics');
+  const [smtpFromEmail, setSmtpFromEmail] = useState('');
 
   // Step 3 — GMB
   const [gmbClientId, setGmbClientId] = useState('');
@@ -41,12 +43,14 @@ export default function SetupWizard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           admin: { email: adminEmail.trim(), password: adminPassword, full_name: adminName.trim() },
-          gmail: {
-            user: gmailUser.trim(),
-            from_name: gmailFromName.trim(),
-            oauth_client_id: gmailClientId.trim(),
-            oauth_client_secret: gmailClientSecret.trim(),
-            refresh_token: gmailRefreshToken.trim(),
+          smtp: {
+            host: smtpHost.trim(),
+            port: parseInt(smtpPort.toString(), 10),
+            user: smtpUser.trim(),
+            pass: smtpPass,
+            secure: smtpSecure,
+            from_name: smtpFromName.trim(),
+            from_email: smtpFromEmail.trim() || undefined,
           },
           gmb: {
             oauth_client_id: gmbClientId.trim(),
@@ -57,7 +61,6 @@ export default function SetupWizard() {
       });
       const j = await res.json();
       if (!res.ok) throw new Error(typeof j?.error === 'string' ? j.error : JSON.stringify(j.error));
-      // Hard redirect bypasses router cache and forces middleware re-check
       window.location.href = '/login?setup=done';
     } catch (e: any) {
       setErr(e.message);
@@ -68,10 +71,7 @@ export default function SetupWizard() {
 
   function canProceed(): boolean {
     if (step === 1) return adminEmail.includes('@') && adminPassword.length >= 8;
-    if (step === 2) return gmailUser.includes('@')
-      && gmailClientId.length > 10
-      && gmailClientSecret.length > 10
-      && gmailRefreshToken.length > 20;
+    if (step === 2) return smtpHost.length > 3 && smtpUser.length > 2 && smtpPass.length > 0;
     if (step === 3) return gmbClientId.length > 10 && gmbClientSecret.length > 10;
     return true;
   }
@@ -113,38 +113,43 @@ export default function SetupWizard() {
         )}
 
         {step === 2 && (
-          <Section title="Communication Layer" hint="Configure Gmail OAuth for automated report delivery.">
-            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-[11px] text-indigo-900/80 leading-relaxed mb-6">
-              <p className="font-bold text-indigo-900 mb-1 flex items-center gap-2">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                OAUTH GUIDANCE
-              </p>
-              Use <a className="underline font-bold hover:text-indigo-600 transition-colors" target="_blank" href="https://developers.google.com/oauthplayground">OAuth Playground</a> to authorize <code className="bg-white/60 px-1 rounded">mail.google.com</code> and generate a persistent refresh token for this project.
+          <Section title="Communication Layer" hint="Configure SMTP for automated report delivery.">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="SMTP Host *">
+                <input type="text" value={smtpHost} onChange={e => setSmtpHost(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="smtp.gmail.com" />
+              </Field>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Port">
+                  <input type="number" value={smtpPort} onChange={e => setSmtpPort(parseInt(e.target.value, 10))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
+                </Field>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={smtpSecure} onChange={e => setSmtpSecure(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" />
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">SSL/TLS</span>
+                  </label>
+                </div>
+              </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Sender Email *">
-                <input type="email" value={gmailUser} onChange={e => setGmailUser(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="[email protected]" />
+              <Field label="SMTP Username *">
+                <input type="text" value={smtpUser} onChange={e => setSmtpUser(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="user@example.com" />
               </Field>
-              <Field label="Display Name">
-                <input type="text" value={gmailFromName} onChange={e => setGmailFromName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
+              <Field label="SMTP Password *">
+                <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="••••••••" />
               </Field>
             </div>
-            
-            <Field label="OAuth Client ID *">
-              <input type="text" value={gmailClientId} onChange={e => setGmailClientId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="xxxxx.apps.googleusercontent.com" />
-            </Field>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Client Secret *">
-                <input type="password" value={gmailClientSecret} onChange={e => setGmailClientSecret(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="GOCSPX-..." />
+              <Field label="Sender Name">
+                <input type="text" value={smtpFromName} onChange={e => setSmtpFromName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
               </Field>
-              <Field label="Refresh Token *">
-                <input type="password" value={gmailRefreshToken} onChange={e => setGmailRefreshToken(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="1//0gK..." />
+              <Field label="Sender Email" hint="Optional — defaults to username">
+                <input type="email" value={smtpFromEmail} onChange={e => setSmtpFromEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
               </Field>
             </div>
           </Section>
@@ -164,82 +169,6 @@ export default function SetupWizard() {
               <input type="password" value={gmbClientSecret} onChange={e => setGmbClientSecret(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="GOCSPX-..." />
             </Field>
-
-            <div className="mt-8 pt-8 border-t border-slate-100">
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">Client Project Schema</p>
-              <div className="bg-slate-900 rounded-2xl p-6 relative group overflow-hidden">
-                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(`-- Run this in your Client Supabase SQL Editor
-create table public.branches (
-  id uuid primary key default gen_random_uuid(),
-  brand text not null,
-  branch_name text not null,
-  city text,
-  address text,
-  google_maps_link text,
-  phone text,
-  website text,
-  stars numeric(3,2) default 0,
-  reviews_count int default 0,
-  popular_times jsonb,
-  created_at timestamptz not null default now()
-);
-
-create table public.reviews (
-  id bigserial primary key,
-  brand text not null,
-  branch_id uuid references public.branches(id) on delete cascade,
-  rating int check (rating between 1 and 5),
-  text text,
-  reviewer_name text,
-  published_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create table public.analyses (
-  id uuid primary key default gen_random_uuid(),
-  brand text not null unique,
-  branch_count int default 0,
-  total_reviews_3m int default 0,
-  avg_rating_3m numeric(3,2) default 0,
-  star_5_count int default 0,
-  star_4_count int default 0,
-  star_3_count int default 0,
-  star_2_count int default 0,
-  star_1_count int default 0,
-  last_updated_at timestamptz not null default now()
-);
-
-create table public.job_history (
-  id uuid primary key default gen_random_uuid(),
-  branches_total int default 0,
-  reviews_total int default 0,
-  finished_at timestamptz not null default now()
-);`);
-                    }}
-                    className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all text-[10px] font-bold uppercase"
-                  >
-                    Copy SQL
-                  </button>
-                </div>
-                <pre className="text-[10px] text-indigo-300 font-mono leading-relaxed overflow-x-auto max-h-[150px]">
-{`-- CLIENT SUPABASE SCHEMA
-create table public.branches (
-  id uuid primary key default ...
-  ...
-  stars numeric(3,2) default 0,
-  reviews_count int default 0,
-);
-
--- Click Copy for full query`}
-                </pre>
-              </div>
-              <p className="text-[10px] font-medium text-slate-500 mt-3 leading-relaxed">
-                Run the full SQL script in the **SQL Editor** of the project you connect to each client.
-              </p>
-            </div>
           </Section>
         )}
 
@@ -276,8 +205,8 @@ create table public.branches (
                 <span className="text-sm font-bold text-slate-900">{adminEmail}</span>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Comms Interface</span>
-                <span className="text-sm font-bold text-slate-900">{gmailUser}</span>
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">SMTP Gateway</span>
+                <span className="text-sm font-bold text-slate-900">{smtpHost}</span>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-slate-100">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">GMB Engine</span>
@@ -326,7 +255,7 @@ create table public.branches (
 }
 
 function Stepper({ current }: { current: number }) {
-  const labels = ['Admin', 'Gmail', 'GMB', 'Prefs', 'Confirm'];
+  const labels = ['Admin', 'SMTP', 'GMB', 'Prefs', 'Confirm'];
   return (
     <div className="flex items-center gap-1.5 mt-8 w-full">
       {labels.map((label, i) => {

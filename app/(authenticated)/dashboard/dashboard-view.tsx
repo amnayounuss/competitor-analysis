@@ -21,12 +21,12 @@ interface BranchAnalytics {
   busy_hours_summary: string | null;
   avg_rating_period: number | null;
   total_reviews_period: number;
-  month_1_reviews: number;
-  month_1_avg_rating: number | null;
-  month_2_reviews: number;
-  month_2_avg_rating: number | null;
-  month_3_reviews: number;
-  month_3_avg_rating: number | null;
+  period_1_reviews: number;
+  period_1_avg_rating: number | null;
+  period_2_reviews: number;
+  period_2_avg_rating: number | null;
+  period_3_reviews: number;
+  period_3_avg_rating: number | null;
   star_5_count: number;
   star_4_count: number;
   star_3_count: number;
@@ -40,8 +40,8 @@ interface BranchAnalytics {
 interface Analysis {
   brand: string;
   branch_count: number;
-  total_reviews_3m: number;
-  avg_rating_3m: number;
+  total_reviews_period: number;
+  avg_rating_period: number;
   star_5_count: number;
   star_4_count: number;
   star_3_count: number;
@@ -93,8 +93,8 @@ interface BrandSummary {
   avgRating: number | null;
   stars: [number, number, number, number, number];
   monthly: { reviews: number; avg: number | null }[];
-  currentMonthReviews: number;
-  currentMonthAvg: number | null;
+  currentPeriodReviews: number;
+  currentPeriodAvg: number | null;
   color: string;
 }
 
@@ -132,12 +132,12 @@ function buildBrandSummaries(
     }
     x.s5 += a.star_5_count; x.s4 += a.star_4_count;
     x.s3 += a.star_3_count; x.s2 += a.star_2_count; x.s1 += a.star_1_count;
-    x.m1r += a.month_1_reviews;
-    if (a.month_1_avg_rating != null) { x.m1s += a.month_1_avg_rating * a.month_1_reviews; x.m1w += a.month_1_reviews; }
-    x.m2r += a.month_2_reviews;
-    if (a.month_2_avg_rating != null) { x.m2s += a.month_2_avg_rating * a.month_2_reviews; x.m2w += a.month_2_reviews; }
-    x.m3r += a.month_3_reviews;
-    if (a.month_3_avg_rating != null) { x.m3s += a.month_3_avg_rating * a.month_3_reviews; x.m3w += a.month_3_reviews; }
+    x.m1r += a.period_1_reviews;
+    if (a.period_1_avg_rating != null) { x.m1s += a.period_1_avg_rating * a.period_1_reviews; x.m1w += a.period_1_reviews; }
+    x.m2r += a.period_2_reviews;
+    if (a.period_2_avg_rating != null) { x.m2s += a.period_2_avg_rating * a.period_2_reviews; x.m2w += a.period_2_reviews; }
+    x.m3r += a.period_3_reviews;
+    if (a.period_3_avg_rating != null) { x.m3s += a.period_3_avg_rating * a.period_3_reviews; x.m3w += a.period_3_reviews; }
   }
 
   const allBrands = new Set([...brandOrder, ...Object.keys(acc)]);
@@ -159,8 +159,8 @@ function buildBrandSummaries(
         { reviews: x.m2r, avg: x.m2w > 0 ? +(x.m2s / x.m2w).toFixed(2) : null },
         { reviews: x.m3r, avg: x.m3w > 0 ? +(x.m3s / x.m3w).toFixed(2) : null },
       ],
-      currentMonthReviews: x.m1r,
-      currentMonthAvg: x.m1w > 0 ? +(x.m1s / x.m1w).toFixed(2) : null,
+      currentPeriodReviews: x.m1r,
+      currentPeriodAvg: x.m1w > 0 ? +(x.m1s / x.m1w).toFixed(2) : null,
       color: colorMap[brand],
     });
   }
@@ -350,18 +350,19 @@ export default function DashboardView({ data }: DashboardProps) {
       {activeTab === 'overview' && (
         <>
           {/* KPI Summary Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <KPI
               label={targetBrand || 'Target'}
-              value={`${(targetSummary?.avgRating ?? 0).toFixed(1)} ★`}
-              sub={`${targetSummary?.branches ?? 0} branches · ${(targetSummary?.totalReviews ?? 0).toLocaleString()} reviews`}
+              labelColor={targetSummary?.color || PALETTE[0]}
+              value={`${(targetSummary?.avgRating ?? 0).toFixed(2)} ★`}
+              sub={`${targetSummary?.totalReviews ?? 0} reviews`}
               color="indigo"
               badge={targetBrand ? 'TARGET' : undefined}
             />
             <KPI
               label="Competitors Avg"
-              value={`${compAvgRating.toFixed(1)} ★`}
-              sub={`${compSummaries.reduce((s, c) => s + c.branches, 0)} branches · ${compSummaries.reduce((s, c) => s + c.totalReviews, 0).toLocaleString()} reviews`}
+              value={`${compAvgRating.toFixed(2)} ★`}
+              sub={`${compSummaries.reduce((s, c) => s + c.totalReviews, 0).toLocaleString()} reviews`}
               color="slate"
             />
             <KPI
@@ -371,10 +372,16 @@ export default function DashboardView({ data }: DashboardProps) {
               color={isAhead ? 'emerald' : 'rose'}
             />
             <KPI
-              label="Analysis Period"
-              value={`${analytics.length} branches`}
-              sub={periodLabel}
+              label="Target Branches"
+              value={`${targetSummary?.branches ?? 0}`}
+              sub="Our total footprint"
               color="amber"
+            />
+            <KPI
+              label="Comp. Branches"
+              value={`${compSummaries.reduce((s, c) => s + c.branches, 0)}`}
+              sub="Competitor footprint"
+              color="slate"
             />
           </div>
 
@@ -391,7 +398,7 @@ export default function DashboardView({ data }: DashboardProps) {
                 </div>
                 <div>
                   <div className="text-lg font-black text-slate-900">
-                    {targetBrand || 'Target'} is {isAhead ? 'AHEAD' : 'BEHIND'} by {Math.abs(ratingGap).toFixed(2)} stars
+                    <span style={{ color: targetSummary?.color || PALETTE[0] }}>{targetBrand || 'Target'}</span> is {isAhead ? 'AHEAD' : 'BEHIND'} by {Math.abs(ratingGap).toFixed(2)} stars
                   </div>
                   <div className="text-sm text-slate-500 font-medium">
                     {(targetSummary?.avgRating ?? 0).toFixed(2)} ★ vs {compAvgRating.toFixed(2)} ★ competitors average
@@ -410,7 +417,7 @@ export default function DashboardView({ data }: DashboardProps) {
                     <div key={comp.brand} className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                       <div className="flex items-center gap-2 min-w-[200px]">
                         <BrandBadge brand={targetBrand || 'Target'} color={targetSummary?.color || PALETTE[0]} />
-                        <span className="text-[10px] font-black text-slate-400">vs</span>
+                        <span className="text-xs font-black text-slate-300 mx-1">VS</span>
                         <BrandBadge brand={comp.brand} color={comp.color} />
                       </div>
                       <div className="flex-1">
@@ -418,9 +425,9 @@ export default function DashboardView({ data }: DashboardProps) {
                           <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden relative">
                             <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(tRating / 5) * 100}%`, backgroundColor: targetSummary?.color || PALETTE[0] }} />
                           </div>
-                          <span className="text-xs font-black text-slate-700 w-10 text-right">{tRating.toFixed(1)}</span>
+                          <span className="text-xs font-black text-slate-700 w-10 text-right">{tRating.toFixed(2)}</span>
                           <span className="text-[10px] text-slate-400">vs</span>
-                          <span className="text-xs font-black text-slate-700 w-10">{cRating.toFixed(1)}</span>
+                          <span className="text-xs font-black text-slate-700 w-10">{cRating.toFixed(2)}</span>
                           <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden relative">
                             <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(cRating / 5) * 100}%`, backgroundColor: comp.color }} />
                           </div>
@@ -460,8 +467,8 @@ export default function DashboardView({ data }: DashboardProps) {
                           {b.isTarget && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase">Target</span>}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentMonthAvg?.toFixed(2) ?? '—'} ★</td>
-                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentMonthReviews.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentPeriodAvg?.toFixed(2) ?? '—'} ★</td>
+                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentPeriodReviews.toLocaleString()}</td>
                       <td className="px-3 py-3 text-right font-black text-slate-900">{b.branches}</td>
                       <td className="px-3 py-3 text-right font-bold text-slate-600">{b.avgRating?.toFixed(2) ?? '—'} ★</td>
                       <td className="px-3 py-3 text-right font-bold text-slate-600">{b.totalReviews.toLocaleString()}</td>
@@ -472,17 +479,66 @@ export default function DashboardView({ data }: DashboardProps) {
             </div>
           </Card>
 
-          {/* Star Distribution — Donut Charts */}
+          {/* Star Distribution — Premium Donut Portfolio */}
           <Card>
-            <SectionHeader title="Star Distribution" sub="5★ to 1★ breakdown per brand — hover slices for details" />
-            <div className="mt-6 flex flex-wrap justify-center gap-8">
-              {brandSummaries.map(b => (
-                <div key={b.brand} className="flex flex-col items-center gap-2">
-                  <BrandBadge brand={b.brand} color={b.color} />
-                  <DonutChart stars={b.stars} color={b.color} size={150} />
-                  <span className="text-[10px] font-black text-slate-400">{b.stars.reduce((s, n) => s + n, 0).toLocaleString()} reviews</span>
-                </div>
-              ))}
+            <SectionHeader title="Brand Sentiment Analysis" sub="5★ to 1★ distribution across all brands" />
+            
+            <div className="mt-8 grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {brandSummaries.map(b => {
+                const isTarget = b.isTarget;
+                const total = b.totalReviews || 1;
+                
+                return (
+                  <div key={b.brand} className={`p-6 rounded-[2rem] border transition-all ${isTarget ? 'bg-slate-900 border-slate-800 shadow-2xl' : 'bg-white border-slate-100 shadow-sm'}`}>
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: b.color }} />
+                        <h4 className={`text-lg font-black tracking-tight ${isTarget ? 'text-white' : 'text-slate-900'}`}>{b.brand}</h4>
+                      </div>
+                      {isTarget && <span className="text-[8px] font-black px-2 py-1 bg-indigo-600 text-white rounded-lg uppercase">Target</span>}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-8">
+                      {/* Donut Chart with Center Text */}
+                      <div className="relative shrink-0">
+                        <DonutChart stars={b.stars} color={b.color} size={160} />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                          <div className={`text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1`}>Rating</div>
+                          <div className={`text-3xl font-black leading-none ${isTarget ? 'text-white' : 'text-slate-900'}`}>
+                            {b.avgRating?.toFixed(2) || '—'}
+                          </div>
+                          <Star className="w-3 h-3 mt-1.5 opacity-50 fill-current" style={{ color: b.color }} />
+                        </div>
+                      </div>
+
+                      {/* Detailed Legend */}
+                      <div className="flex-1 w-full space-y-2">
+                        {[5, 4, 3, 2, 1].map((star, idx) => {
+                          const count = b.stars[idx];
+                          const pct = (count / total) * 100;
+                          const color = star >= 4 ? '#10B981' : star === 3 ? '#FBBF24' : '#F43F5E';
+                          
+                          return (
+                            <div key={star} className="flex items-center gap-3">
+                              <div className="flex items-center gap-1 w-8">
+                                <span className={`text-[10px] font-black ${isTarget ? 'text-slate-400' : 'text-slate-500'}`}>{star}</span>
+                                <Star className="w-2.5 h-2.5 fill-current opacity-40" style={{ color }} />
+                              </div>
+                              <div className={`flex-1 h-1.5 rounded-full ${isTarget ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                                <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color, boxShadow: isTarget ? `0 0 8px ${color}40` : 'none' }} />
+                              </div>
+                              <div className="flex items-center gap-2 min-w-[70px] justify-end">
+                                <span className={`text-[10px] font-black ${isTarget ? 'text-white' : 'text-slate-900'}`}>{pct.toFixed(1)}%</span>
+                                <span className="text-[9px] font-bold text-slate-500">({count})</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
 
@@ -504,8 +560,8 @@ export default function DashboardView({ data }: DashboardProps) {
                 />
                 <div className="flex flex-wrap justify-center gap-4 mt-3">
                   {brandSummaries.map(b => (
-                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                      <span className="w-3 h-[3px] rounded-full" style={{ backgroundColor: b.color }} />
+                    <span key={b.brand} className="flex items-center gap-2 text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>
+                      <span className="w-4 h-[2px] rounded-full" style={{ backgroundColor: b.color }} />
                       {b.brand}
                     </span>
                   ))}
@@ -527,8 +583,8 @@ export default function DashboardView({ data }: DashboardProps) {
                 />
                 <div className="flex flex-wrap justify-center gap-4 mt-3">
                   {brandSummaries.map(b => (
-                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                      <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                    <span key={b.brand} className="flex items-center gap-2 text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>
+                      <span className="w-3 h-3 rounded-sm shadow-sm" style={{ backgroundColor: b.color }} />
                       {b.brand}
                     </span>
                   ))}
@@ -541,27 +597,94 @@ export default function DashboardView({ data }: DashboardProps) {
           <Card>
             <SectionHeader title="Branch Rating Overview" sub="Every branch plotted by average rating — quickly spot outliers" />
             <div className="mt-6">
+            <div className="mt-8 space-y-10">
               {brandSummaries.map(bs => {
                 const brandBranches = analytics
                   .filter(a => a.brand === bs.brand && a.avg_rating_period != null && a.total_reviews_period > 0)
                   .sort((a, b) => (b.avg_rating_period ?? 0) - (a.avg_rating_period ?? 0));
+                
                 if (brandBranches.length === 0) return null;
+
+                // Stats for health bar
+                const green = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 4.0).length;
+                const amber = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 3.0 && (a.avg_rating_period ?? 0) < 4.0).length;
+                const red = brandBranches.length - green - amber;
+
+                // Stats for health bar
+                const greenCount = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 4.0).length;
+                const amberCount = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 3.0 && (a.avg_rating_period ?? 0) < 4.0).length;
+                const redCount = brandBranches.length - greenCount - amberCount;
+                
+                const greenPct = Math.round((greenCount / brandBranches.length) * 100);
+                const amberPct = Math.round((amberCount / brandBranches.length) * 100);
+                const redPct = 100 - greenPct - amberPct;
+
                 return (
-                  <div key={bs.brand} className="mb-6 last:mb-0">
-                    <div className="flex items-center gap-2 mb-3">
-                      <BrandBadge brand={bs.brand} color={bs.color} />
-                      <span className="text-[10px] font-black text-slate-400">{brandBranches.length} branches</span>
+                  <div key={bs.brand} className="relative group bg-white/50 backdrop-blur-sm p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-md transition-all duration-500">
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
+                      {/* Brand Ident & Status */}
+                      <div className="flex items-center gap-4 min-w-[200px]">
+                        <div className="w-1.5 h-10 rounded-full" style={{ backgroundColor: bs.color }} />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-black text-slate-900 tracking-tight uppercase leading-none">{bs.brand}</h4>
+                            {bs.isTarget && <span className="text-[7px] font-black bg-indigo-600 text-white px-1.5 py-0.5 rounded-md uppercase tracking-widest">Target</span>}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{brandBranches.length} Branches</span>
+                            <span className="w-1 h-1 rounded-full bg-slate-300" />
+                            <span className={`text-[9px] font-black uppercase tracking-tighter ${
+                              greenPct >= 70 ? 'text-emerald-500' : redPct > 20 ? 'text-rose-500' : 'text-amber-500'
+                            }`}>
+                              {greenPct >= 70 ? 'Market Leader' : redPct > 20 ? 'Action Required' : 'Maintaining'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Premium Health Bar */}
+                      <div className="flex-1 max-w-md">
+                        <div className="flex justify-between items-center mb-2 px-1">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Portfolio Quality Distribution</span>
+                          <div className="flex gap-3 text-[10px] font-black">
+                            <div className="flex items-center gap-1.5 text-emerald-600">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              {greenPct}%
+                            </div>
+                            <div className="flex items-center gap-1.5 text-rose-500">
+                              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              {redPct}%
+                            </div>
+                          </div>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-100 p-0.5 flex gap-0.5">
+                          <div style={{ width: `${greenPct}%` }} className="h-full bg-emerald-500 rounded-l-full shadow-[0_0_10px_rgba(16,185,129,0.2)]" />
+                          <div style={{ width: `${amberPct}%` }} className="h-full bg-amber-400" />
+                          <div style={{ width: `${redPct}%` }} className="h-full bg-rose-500 rounded-r-full shadow-[0_0_10px_rgba(244,63,94,0.2)]" />
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+
+                    <div className="flex flex-wrap gap-2.5 p-6 bg-slate-50/30 rounded-[2.5rem] border border-slate-100/50">
                       {brandBranches.map(a => {
                         const r = a.avg_rating_period ?? 0;
-                        const opacity = Math.max(0.3, Math.min(1, a.total_reviews_period / 20));
-                        const bgColor = r >= 4.5 ? '#10B981' : r >= 4 ? '#34D399' : r >= 3.5 ? '#FBBF24' : r >= 3 ? '#FB923C' : '#F43F5E';
+                        const alpha = Math.max(0.4, Math.min(1, a.total_reviews_period / 30));
+                        let baseColor = '16, 185, 129';
+                        if (r < 4.5) baseColor = '52, 211, 153';
+                        if (r < 4.0) baseColor = '251, 191, 36';
+                        if (r < 3.5) baseColor = '251, 146, 60';
+                        if (r < 3.0) baseColor = '244, 63, 94';
+                        const isTop = r >= 4.5;
+                        const useDarkText = (r >= 3.0 && r < 4.5) || alpha < 0.7;
+                        
                         return (
                           <div key={a.id}
-                               className="group relative px-2 py-1 rounded-lg text-[9px] font-black text-white cursor-help transition-transform hover:scale-110 hover:z-10"
-                               style={{ backgroundColor: bgColor, opacity }}
-                               title={`${a.branch_name}\n${r.toFixed(2)} ★ · ${a.total_reviews_period} reviews · ${a.city || ''}`}>
+                               className={`w-8 h-8 rounded-full flex items-center justify-center text-[9px] font-black cursor-help transition-all duration-300 hover:scale-150 hover:z-20 border border-white/50 ${useDarkText ? 'text-slate-900' : 'text-white'} ${isTop ? 'ring-2 ring-emerald-500/10 ring-offset-1' : ''}`}
+                               style={{ 
+                                 backgroundColor: `rgba(${baseColor}, ${alpha})`,
+                                 boxShadow: isTop ? `0 4px 12px rgba(${baseColor}, 0.3)` : 'inset 0 1px 2px rgba(255,255,255,0.1)'
+                               }}
+                               title={`${a.branch_name}\n${r.toFixed(2)} ★ · ${a.total_reviews_period} reviews`}>
                             {r.toFixed(1)}
                           </div>
                         );
@@ -570,21 +693,32 @@ export default function DashboardView({ data }: DashboardProps) {
                   </div>
                 );
               })}
-              <div className="flex items-center gap-3 mt-4 pt-3 border-t border-slate-100">
-                <span className="text-[9px] font-black text-slate-400 uppercase">Rating Scale:</span>
-                {[
-                  { label: '4.5+', color: '#10B981' },
-                  { label: '4.0+', color: '#34D399' },
-                  { label: '3.5+', color: '#FBBF24' },
-                  { label: '3.0+', color: '#FB923C' },
-                  { label: '<3.0', color: '#F43F5E' },
-                ].map(s => (
-                  <span key={s.label} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
-                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />{s.label}
-                  </span>
-                ))}
-                <span className="text-[9px] text-slate-400 ml-2">· opacity = review volume</span>
+
+              <div className="flex flex-wrap items-center gap-6 mt-6 pt-6 border-t border-slate-100">
+                <div className="flex items-center gap-4">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Quality Legend:</span>
+                  <div className="flex gap-2">
+                    {[
+                      { label: '4.5+', color: '#10B981' },
+                      { label: '4.0+', color: '#34D399' },
+                      { label: '3.5+', color: '#FBBF24' },
+                      { label: '3.0+', color: '#FB923C' },
+                      { label: '<3.0', color: '#F43F5E' },
+                    ].map(s => (
+                      <div key={s.label} className="flex items-center gap-1">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                        <span className="text-[9px] font-bold text-slate-500">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-1.5 rounded-full bg-slate-400 opacity-40" />
+                  <span className="text-[8px] font-bold text-slate-500">Opacity = Review Volume</span>
+                </div>
               </div>
+            </div>
             </div>
           </Card>
 
@@ -604,26 +738,40 @@ export default function DashboardView({ data }: DashboardProps) {
                     <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {cityBreakdown.slice(0, 20).map(row => (
-                    <tr key={row.city} className="hover:bg-slate-50/50">
-                      <td className="px-3 py-3 font-black text-slate-900 uppercase text-[11px] tracking-tight">{row.city}</td>
+                <tbody className="divide-y divide-slate-100">
+                  {cityBreakdown.map(row => (
+                    <tr key={row.city} className="hover:bg-slate-50/50 transition-colors">
+                      {/* City Column */}
+                      <td className="px-4 py-4">
+                        <div className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{row.city}</div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{row.totalBranches} Branches Market</div>
+                      </td>
+
+                      {/* Brand Columns */}
                       {brandSummaries.map(bs => {
                         const cell = row.brands.find(b => b.brand === bs.brand);
+                        const rating = cell?.avgRating ?? 0;
+                        
                         return (
-                          <td key={bs.brand} className="px-3 py-3 text-center">
+                          <td key={bs.brand} className={`px-4 py-4 text-center ${bs.isTarget ? 'bg-slate-50/50' : ''}`}>
                             {cell ? (
-                              <div>
-                                <span className="font-black text-slate-900">{(cell.avgRating ?? 0).toFixed(1)} ★</span>
-                                <span className="text-[10px] text-slate-400 ml-1">({cell.branches}b · {cell.reviews}r)</span>
+                              <div className="flex flex-col items-center">
+                                <div className="text-[11px] font-black text-slate-900 tracking-tight">
+                                  {rating.toFixed(2)} ★
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-500 mt-0.5 uppercase tracking-tighter">
+                                  {cell.branches} Br · {cell.reviews.toLocaleString()} Rev
+                                </div>
                               </div>
                             ) : (
-                              <span className="text-slate-300">—</span>
+                              <div className="text-[10px] font-bold text-slate-200">—</div>
                             )}
                           </td>
                         );
                       })}
-                      <td className="px-3 py-3 text-right font-black text-slate-500">{row.totalBranches}</td>
+                      <td className="px-4 py-4 text-right">
+                        <div className="text-[11px] font-black text-slate-500">{row.totalBranches}</div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -674,12 +822,12 @@ export default function DashboardView({ data }: DashboardProps) {
                     <TH>Busy Hours</TH>
                     <TH clickable onClick={() => handleSort('rating')} align="right">Avg ★ {sortCol === 'rating' ? (sortAsc ? '↑' : '↓') : ''}</TH>
                     <TH clickable onClick={() => handleSort('reviews')} align="right">Reviews {sortCol === 'reviews' ? (sortAsc ? '↑' : '↓') : ''}</TH>
-                    <TH align="right">M1 Rev</TH>
-                    <TH align="right">M1 ★</TH>
-                    <TH align="right">M2 Rev</TH>
-                    <TH align="right">M2 ★</TH>
-                    <TH align="right">M3 Rev</TH>
-                    <TH align="right">M3 ★</TH>
+                    <TH align="right">P1 Rev</TH>
+                    <TH align="right">P1 ★</TH>
+                    <TH align="right">P2 Rev</TH>
+                    <TH align="right">P2 ★</TH>
+                    <TH align="right">P3 Rev</TH>
+                    <TH align="right">P3 ★</TH>
                     <TH align="center">5★</TH>
                     <TH align="center">4★</TH>
                     <TH align="center">3★</TH>
@@ -707,12 +855,12 @@ export default function DashboardView({ data }: DashboardProps) {
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[140px] truncate" title={a.busy_hours_summary || ''}>{a.busy_hours_summary || '—'}</td>
                       <td className="px-2 py-3 text-right font-black text-slate-900">{a.avg_rating_period?.toFixed(2) ?? '—'}</td>
                       <td className="px-2 py-3 text-right font-black text-slate-900">{a.total_reviews_period}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.month_1_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.month_1_avg_rating?.toFixed(2) ?? '—'}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.month_2_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.month_2_avg_rating?.toFixed(2) ?? '—'}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.month_3_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.month_3_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_1_reviews}</td>
+                      <td className="px-2 py-3 text-right text-slate-500">{a.period_1_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_2_reviews}</td>
+                      <td className="px-2 py-3 text-right text-slate-500">{a.period_2_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_3_reviews}</td>
+                      <td className="px-2 py-3 text-right text-slate-500">{a.period_3_avg_rating?.toFixed(2) ?? '—'}</td>
                       <td className="px-2 py-3 text-center text-emerald-600 font-bold">{a.star_5_count}</td>
                       <td className="px-2 py-3 text-center text-emerald-400 font-bold">{a.star_4_count}</td>
                       <td className="px-2 py-3 text-center text-amber-500 font-bold">{a.star_3_count}</td>
@@ -772,9 +920,9 @@ export default function DashboardView({ data }: DashboardProps) {
               {/* Monthly breakdown */}
               <div className="grid grid-cols-3 gap-3 mb-6">
                 {[
-                  { label: 'Period 1 (Newest)', reviews: selected.month_1_reviews, avg: selected.month_1_avg_rating },
-                  { label: 'Period 2', reviews: selected.month_2_reviews, avg: selected.month_2_avg_rating },
-                  { label: 'Period 3 (Oldest)', reviews: selected.month_3_reviews, avg: selected.month_3_avg_rating },
+                  { label: 'Period 1 (Newest)', reviews: selected.period_1_reviews, avg: selected.period_1_avg_rating },
+                  { label: 'Period 2', reviews: selected.period_2_reviews, avg: selected.period_2_avg_rating },
+                  { label: 'Period 3 (Oldest)', reviews: selected.period_3_reviews, avg: selected.period_3_avg_rating },
                 ].map((m, i) => (
                   <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <div className="text-[9px] font-black text-slate-400 uppercase">{m.label}</div>
@@ -1128,21 +1276,7 @@ function DonutChart({ stars, color, size = 140 }: { stars: [number, number, numb
     <div className="flex flex-col items-center">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         {slices}
-        <text x={cx} y={cy - 4} textAnchor="middle" className="fill-slate-900 text-lg" style={{ fontSize: 22, fontWeight: 900 }}>
-          {avg.toFixed(1)}
-        </text>
-        <text x={cx} y={cy + 14} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          avg ★
-        </text>
       </svg>
-      <div className="flex gap-2 mt-2 flex-wrap justify-center">
-        {stars.map((c, i) => c > 0 ? (
-          <span key={i} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
-            <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: STAR_COLORS[i] }} />
-            {STAR_LABELS[i]}
-          </span>
-        ) : null)}
-      </div>
     </div>
   );
 }
@@ -1406,7 +1540,12 @@ function PopularTimesHeatmap({ grid }: { grid: Record<string, (number | null)[]>
 // ── Helper Components ──
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={`p-6 md:p-8 bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-lg shadow-slate-200/30 ${className || ''}`}>{children}</div>;
+  return (
+    <div className={`p-6 md:p-8 bg-white/70 backdrop-blur-xl rounded-3xl border border-white/40 shadow-[0_20px_50px_rgba(0,0,0,0.05)] hover:shadow-[0_20px_60px_rgba(99,102,241,0.08)] transition-all duration-500 relative overflow-hidden group ${className || ''}`}>
+      <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      {children}
+    </div>
+  );
 }
 
 function SectionHeader({ title, sub }: { title: string; sub: string }) {
@@ -1418,30 +1557,38 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
   );
 }
 
-function KPI({ label, value, sub, color, badge }: { label: string; value: string; sub: string; color: string; badge?: string }) {
-  const palettes: Record<string, string> = {
-    indigo: 'border-indigo-200 bg-indigo-50/50',
-    emerald: 'border-emerald-200 bg-emerald-50/50',
-    rose: 'border-rose-200 bg-rose-50/50',
-    amber: 'border-amber-200 bg-amber-50/50',
-    slate: 'border-slate-200 bg-slate-50/50',
-  };
+function KPI({ label, value, sub, color, badge, labelColor }: { label: string; value: string; sub: string; color: string; badge?: string; labelColor?: string }) {
+  const isEmerald = color === 'emerald';
+  const isRose = color === 'rose';
+  
   return (
-    <div className={`p-5 rounded-2xl border ${palettes[color] || palettes.slate}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
-        {badge && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-600 text-white rounded uppercase">{badge}</span>}
+    <div className={`p-6 rounded-3xl bg-slate-900 border transition-all hover:scale-[1.02] duration-300 group
+      ${isEmerald ? 'border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 
+        isRose ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.1)]' : 
+        'border-slate-800 shadow-2xl hover:border-slate-700'}`}>
+      
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: labelColor || '#94a3b8' }}>{label}</span>
+        {badge && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-600 text-white rounded-md uppercase">{badge}</span>}
       </div>
-      <div className="text-2xl font-black text-slate-900 leading-none">{value}</div>
-      <div className="text-[10px] font-bold text-slate-500 mt-1">{sub}</div>
+
+      <div className={`text-3xl font-black leading-none tracking-tight
+        ${isEmerald ? 'text-emerald-400' : isRose ? 'text-rose-400' : 'text-white'}`}>
+        {value}
+      </div>
+
+      <div className={`text-[10px] font-bold mt-2 transition-colors
+        ${isEmerald ? 'text-emerald-500/70' : isRose ? 'text-rose-500/70' : 'text-slate-500 group-hover:text-slate-400'}`}>
+        {sub}
+      </div>
     </div>
   );
 }
 
 function BrandBadge({ brand, color }: { brand: string; color: string }) {
   return (
-    <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase text-white shadow-sm whitespace-nowrap"
-          style={{ backgroundColor: color }}>
+    <span className="text-sm font-black uppercase tracking-tight whitespace-nowrap"
+          style={{ color: color }}>
       {brand}
     </span>
   );
@@ -1474,4 +1621,12 @@ function TH({ children, clickable, onClick, align }: { children: React.ReactNode
     return <th className={`${base} cursor-pointer hover:text-indigo-600 select-none`} onClick={onClick}>{children}</th>;
   }
   return <th className={base}>{children}</th>;
+}
+
+function Star({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg className={className} style={style} fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.97a1 1 0 00.95.69h4.18c.969 0 1.371 1.24.588 1.81l-3.388 2.46a1 1 0 00-.364 1.118l1.286 3.97c.3.921-.755 1.688-1.54 1.118l-3.388-2.46a1 1 0 00-1.175 0l-3.388 2.46c-.784.57-1.838-.197-1.539-1.118l1.286-3.97a1 1 0 00-.364-1.118L2.245 9.397c-.783-.57-.38-1.81.588-1.81h4.18a1 1 0 00.95-.69l1.286-3.97z" />
+    </svg>
+  );
 }

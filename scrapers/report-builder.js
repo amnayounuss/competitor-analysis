@@ -69,10 +69,10 @@ function analyzeSentiment(brandAgg) {
  * Lower is better (more consistent experience across branches).
  */
 function ratingStdDev(branches) {
-  const rated = branches.filter((b) => b.avgRating3m !== null && b.totalReviews3m > 0);
+  const rated = branches.filter((b) => b.avgRatingPeriod !== null && b.totalReviewsPeriod > 0);
   if (rated.length < 2) return null;
-  const mean = rated.reduce((s, b) => s + b.avgRating3m, 0) / rated.length;
-  const variance = rated.reduce((s, b) => s + Math.pow(b.avgRating3m - mean, 2), 0) / rated.length;
+  const mean = rated.reduce((s, b) => s + b.avgRatingPeriod, 0) / rated.length;
+  const variance = rated.reduce((s, b) => s + Math.pow(b.avgRatingPeriod - mean, 2), 0) / rated.length;
   return Number(Math.sqrt(variance).toFixed(2));
 }
 
@@ -89,9 +89,9 @@ function buildReport(analysis) {
 
   // --- Sort brands by weighted avg rating ---
   const brandsByRating = [...brandRows].sort(
-    (a, b) => (b.avgRating3m ?? -1) - (a.avgRating3m ?? -1)
+    (a, b) => (b.avgRatingPeriod ?? -1) - (a.avgRatingPeriod ?? -1)
   );
-  const brandsByVolume = [...brandRows].sort((a, b) => b.totalReviews3m - a.totalReviews3m);
+  const brandsByVolume = [...brandRows].sort((a, b) => b.totalReviewsPeriod - a.totalReviewsPeriod);
 
   // --- Sentiment per brand ---
   const sentimentByBrand = {};
@@ -111,7 +111,7 @@ function buildReport(analysis) {
 
   const windowLabel = (config.DATE_START && config.DATE_END)
     ? `${config.DATE_START} → ${config.DATE_END}`
-    : `${cutoffDate.toISOString().slice(0, 10)} → ${today.toISOString().slice(0, 10)} (last ${config.LOOKBACK_MONTHS} months)`;
+    : `${cutoffDate.toISOString().slice(0, 10)} → ${today.toISOString().slice(0, 10)} (analysis period)`;
 
   // ===== Markdown =====
   const lines = [];
@@ -131,21 +131,21 @@ function buildReport(analysis) {
   H(``);
   const topRated  = brandsByRating[0];
   const topVolume = brandsByVolume[0];
-  H(`- **Highest-rated brand (last ${config.LOOKBACK_MONTHS} months):** ${topRated ? `${topRated.brand} (${safe(topRated.avgRating3m)}⭐)` : "N/A"}`);
-  H(`- **Most-reviewed brand (volume leader):** ${topVolume ? `${topVolume.brand} (${topVolume.totalReviews3m} reviews)` : "N/A"}`);
+  H(`- **Highest-rated brand (selected period):** ${topRated ? `${topRated.brand} (${safe(topRated.avgRatingPeriod)}⭐)` : "N/A"}`);
+  H(`- **Most-reviewed brand (volume leader):** ${topVolume ? `${topVolume.brand} (${topVolume.totalReviewsPeriod} reviews)` : "N/A"}`);
   H(`- **Total branches analyzed:** ${branchRows.length}`);
-  H(`- **Total reviews in window:** ${branchRows.reduce((s, r) => s + r.totalReviews3m, 0)}`);
-  if (bestBranch)  H(`- **Best single branch:** ${bestBranch.branchName} (${bestBranch.brand}) — ${bestBranch.avgRating3m}⭐ across ${bestBranch.totalReviews3m} reviews`);
-  if (worstBranch) H(`- **Weakest single branch:** ${worstBranch.branchName} (${worstBranch.brand}) — ${worstBranch.avgRating3m}⭐ across ${worstBranch.totalReviews3m} reviews`);
+  H(`- **Total reviews in window:** ${branchRows.reduce((s, r) => s + r.totalReviewsPeriod, 0)}`);
+  if (bestBranch)  H(`- **Best single branch:** ${bestBranch.branchName} (${bestBranch.brand}) — ${bestBranch.avgRatingPeriod}⭐ across ${bestBranch.totalReviewsPeriod} reviews`);
+  if (worstBranch) H(`- **Weakest single branch:** ${worstBranch.branchName} (${worstBranch.brand}) — ${worstBranch.avgRatingPeriod}⭐ across ${worstBranch.totalReviewsPeriod} reviews`);
   H(``);
 
   // ---- Brand Performance ----
   H(`## 1. Brand Performance`);
   H(``);
-  H(`| Brand | Avg Rating (3m) | Total Reviews (3m) | Branches | Rating Consistency (σ, lower = better) |`);
+  H(`| Brand | Avg Rating (Period) | Total Reviews (Period) | Branches | Rating Consistency (σ, lower = better) |`);
   H(`|---|---|---|---|---|`);
   for (const b of brandsByRating) {
-    H(`| ${b.brand} | ${safe(b.avgRating3m)} | ${b.totalReviews3m} | ${b.totalBranches} | ${safe(consistencyByBrand[b.brand])} |`);
+    H(`| ${b.brand} | ${safe(b.avgRatingPeriod)} | ${b.totalReviewsPeriod} | ${b.totalBranches} | ${safe(consistencyByBrand[b.brand])} |`);
   }
   H(``);
   H(`**Reading the consistency column:** a lower σ means a customer gets roughly the same experience at any branch. A high σ indicates hit-or-miss locations — a red flag for operational standards.`);
@@ -158,8 +158,8 @@ function buildReport(analysis) {
     H(`### ${b.brand}`);
     H(``);
     H(`- **Footprint:** ${b.totalBranches} branches analyzed`);
-    H(`- **Voice of customer:** ${b.totalReviews3m} reviews in the window`);
-    H(`- **Average rating:** ${safe(b.avgRating3m)}⭐`);
+    H(`- **Voice of customer:** ${b.totalReviewsPeriod} reviews in the window`);
+    H(`- **Average rating:** ${safe(b.avgRatingPeriod)}⭐`);
     H(`- **Branch consistency (σ):** ${safe(consistencyByBrand[b.brand])}`);
 
     // Strengths / weaknesses from sentiment
@@ -199,7 +199,7 @@ function buildReport(analysis) {
 
   H(`### Best-performing brand`);
   if (topRated) {
-    H(`**${topRated.brand}** leads on average rating (${safe(topRated.avgRating3m)}⭐ across ${topRated.totalReviews3m} reviews and ${topRated.totalBranches} branches).`);
+    H(`**${topRated.brand}** leads on average rating (${safe(topRated.avgRatingPeriod)}⭐ across ${topRated.totalReviewsPeriod} reviews and ${topRated.totalBranches} branches).`);
   }
   H(``);
 
@@ -217,13 +217,13 @@ function buildReport(analysis) {
         : "no theme data";
 
     const problemBranches = b.branches
-      .filter((br) => br.avgRating3m !== null && br.avgRating3m < 4 && br.totalReviews3m >= 3)
-      .sort((a, c) => a.avgRating3m - c.avgRating3m)
+      .filter((br) => br.avgRatingPeriod !== null && br.avgRatingPeriod < 4 && br.totalReviewsPeriod >= 3)
+      .sort((a, c) => a.avgRatingPeriod - c.avgRatingPeriod)
       .slice(0, 3);
 
     H(`- **${b.brand}** — ${label}.`);
     if (problemBranches.length) {
-      H(`  - Underperforming branches: ${problemBranches.map((br) => `${br.branchName} (${br.avgRating3m}⭐, ${br.totalReviews3m} reviews)`).join("; ")}`);
+      H(`  - Underperforming branches: ${problemBranches.map((br) => `${br.branchName} (${br.avgRatingPeriod}⭐, ${br.totalReviewsPeriod} reviews)`).join("; ")}`);
     }
   }
   H(``);
@@ -238,25 +238,25 @@ function buildReport(analysis) {
   if (highVarianceBrands.length) {
     risks.push(`- **Inconsistent experience across branches:** ${highVarianceBrands.map((b) => `${b.brand} (σ=${consistencyByBrand[b.brand]})`).join(", ")}. A customer's impression depends heavily on which branch they visit.`);
   }
-  const lowVolume = brandRows.filter((b) => b.totalReviews3m < 30);
+  const lowVolume = brandRows.filter((b) => b.totalReviewsPeriod < 30);
   if (lowVolume.length) {
-    risks.push(`- **Low review volume (weak recent signal):** ${lowVolume.map((b) => `${b.brand} (${b.totalReviews3m} reviews in ${config.LOOKBACK_MONTHS} months)`).join(", ")}. Small samples mean a few vocal customers can swing the rating.`);
+    risks.push(`- **Low review volume (weak recent signal):** ${lowVolume.map((b) => `${b.brand} (${b.totalReviewsPeriod} reviews)`).join(", ")}. Small samples mean a few vocal customers can swing the rating.`);
   }
   // Highlight any brand with a concentration of 1⭐/2⭐ reviews
   for (const b of brandRows) {
     const neg = b.branches.reduce((s, br) => s + br.stars1 + br.stars2, 0);
-    const ratio = b.totalReviews3m > 0 ? neg / b.totalReviews3m : 0;
+    const ratio = b.totalReviewsPeriod > 0 ? neg / b.totalReviewsPeriod : 0;
     if (ratio >= 0.15) {
-      risks.push(`- **${b.brand} has a high share of 1–2⭐ reviews** (${(ratio * 100).toFixed(1)}% of ${b.totalReviews3m}). These drag the visible Google rating disproportionately and tend to compound if unanswered.`);
+      risks.push(`- **${b.brand} has a high share of 1–2⭐ reviews** (${(ratio * 100).toFixed(1)}% of ${b.totalReviewsPeriod}). These drag the visible Google rating disproportionately and tend to compound if unanswered.`);
     }
   }
   // Underperforming individual branches regardless of brand
   const bad = branchRows
-    .filter((r) => r.avgRating3m !== null && r.avgRating3m < 3.5 && r.totalReviews3m >= 5)
-    .sort((a, c) => a.avgRating3m - c.avgRating3m)
+    .filter((r) => r.avgRatingPeriod !== null && r.avgRatingPeriod < 3.5 && r.totalReviewsPeriod >= 5)
+    .sort((a, c) => a.avgRatingPeriod - c.avgRatingPeriod)
     .slice(0, 5);
   if (bad.length) {
-    risks.push(`- **Individual branches under 3.5⭐ with meaningful review volume:** ${bad.map((r) => `${r.branchName} (${r.brand}, ${r.avgRating3m}⭐)`).join("; ")}. These are reputational liabilities — a single angry social-media post about any one of them can become the brand's visible story.`);
+    risks.push(`- **Individual branches under 3.5⭐ with meaningful review volume:** ${bad.map((r) => `${r.branchName} (${r.brand}, ${r.avgRatingPeriod}⭐)`).join("; ")}. These are reputational liabilities — a single angry social-media post about any one of them can become the brand's visible story.`);
   }
   if (risks.length === 0) {
     H(`- No structural risk signals detected in this window. Smallest concern: keep review-response velocity high so the picture doesn't drift in the next quarter.`);
@@ -281,8 +281,8 @@ function buildReport(analysis) {
     let saidSomething = false;
     for (const comp of competitorRows) {
       const compSent = sentimentByBrand[comp.brand];
-      if (target.avgRating3m === null || comp.avgRating3m === null) continue;
-      const gap = Number((comp.avgRating3m - target.avgRating3m).toFixed(2));
+      if (target.avgRatingPeriod === null || comp.avgRatingPeriod === null) continue;
+      const gap = Number((comp.avgRatingPeriod - target.avgRatingPeriod).toFixed(2));
       if (gap > 0) {
         const topTheme = compSent
           ? Object.entries(compSent).sort((a, c) => c[1].net - a[1].net)[0]?.[0] || 'overall experience'
@@ -308,13 +308,13 @@ function buildReport(analysis) {
       H(`- Service sentiment is net-positive (${targetSent.service.net}). Lock this in with a documented service standard so it survives staff turnover.`);
     }
     const weakBranches = target.branches
-      .filter((br) => br.avgRating3m !== null && br.avgRating3m < 4 && br.totalReviews3m >= 3)
-      .sort((a, c) => a.avgRating3m - c.avgRating3m)
+      .filter((br) => br.avgRatingPeriod !== null && br.avgRatingPeriod < 4 && br.totalReviewsPeriod >= 3)
+      .sort((a, c) => a.avgRatingPeriod - c.avgRatingPeriod)
       .slice(0, 5);
     if (weakBranches.length) {
       H(`- **Branches needing immediate attention:**`);
       for (const br of weakBranches) {
-        H(`  - ${br.branchName} — ${br.avgRating3m}⭐ over ${br.totalReviews3m} reviews (${br.stars1 + br.stars2} negative reviews in window)`);
+        H(`  - ${br.branchName} — ${br.avgRatingPeriod}⭐ over ${br.totalReviewsPeriod} reviews (${br.stars1 + br.stars2} negative reviews in window)`);
       }
     }
     H(``);
@@ -335,8 +335,8 @@ function buildReport(analysis) {
     }
     H(`- **Review-response discipline:** respond to every 1–2⭐ review within 48 hours. Google weighs recency and response rate; this alone tends to lift visible star ratings within a quarter.`);
     const flagshipNames = target.branches
-      .filter((br) => br.avgRating3m !== null && br.totalReviews3m >= 5)
-      .sort((a, c) => c.avgRating3m - a.avgRating3m)
+      .filter((br) => br.avgRatingPeriod !== null && br.totalReviewsPeriod >= 5)
+      .sort((a, c) => c.avgRatingPeriod - a.avgRatingPeriod)
       .slice(0, 3)
       .map((br) => br.branchName)
       .join(", ");
