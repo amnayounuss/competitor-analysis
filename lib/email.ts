@@ -39,7 +39,7 @@ export async function sendReportEmail(p: ReportEmailParams) {
             <td style="padding:6px 12px">${p.competitors.map(esc).join(', ')}</td></tr>
         <tr><td style="padding:6px 12px;background:#f5f5f5"><b>Branches</b></td>
             <td style="padding:6px 12px;background:#f5f5f5">${p.branchesTotal}</td></tr>
-        <tr><td style="padding:6px 12px"><b>Reviews (3 months)</b></td>
+        <tr><td style="padding:6px 12px"><b>Reviews</b></td>
             <td style="padding:6px 12px">${p.reviewsTotal}</td></tr>
       </table>
       <p style="color:#666;font-size:12px">Sent automatically — do not reply.</p>
@@ -115,7 +115,7 @@ export async function sendReportEmailWithBuffers(p: ResendFromStorageParams) {
             <td style="padding:6px 12px">${p.competitors.map(esc).join(', ')}</td></tr>
         <tr><td style="padding:6px 12px;background:#f5f5f5"><b>Branches</b></td>
             <td style="padding:6px 12px;background:#f5f5f5">${p.branchesTotal}</td></tr>
-        <tr><td style="padding:6px 12px"><b>Reviews (3 months)</b></td>
+        <tr><td style="padding:6px 12px"><b>Reviews</b></td>
             <td style="padding:6px 12px">${p.reviewsTotal}</td></tr>
       </table>
       <p style="color:#666;font-size:12px">Sent automatically — do not reply.</p>
