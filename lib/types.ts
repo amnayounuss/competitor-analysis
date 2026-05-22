@@ -24,6 +24,7 @@ export interface Job {
   date_start?: string | null;
   date_end?: string | null;
   search_location?: string | null;
+  ai_summary?: string | null;
 }
 
 export interface Schedule {
@@ -149,6 +150,7 @@ export interface GlobalDashboardProps {
     dateStart: string | null;
     dateEnd: string | null;
     finishedAt: string | null;
+    aiSummary?: string | null;
   };
   allJobs: Job[];
 }

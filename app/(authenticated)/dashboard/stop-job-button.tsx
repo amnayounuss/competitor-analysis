@@ -1,13 +1,15 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/bilingual';
 
 export default function StopJobButton({ jobId }: { jobId: string }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const t = useT();
 
   async function stop() {
-    if (!confirm('Are you sure you want to stop this analysis?')) return;
+    if (!confirm(t('Are you sure you want to stop this analysis?'))) return;
     setLoading(true);
     try {
       const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
@@ -15,10 +17,10 @@ export default function StopJobButton({ jobId }: { jobId: string }) {
         router.refresh();
       } else {
         const j = await r.json();
-        alert('Failed to stop job: ' + (j.error || 'unknown error'));
+        alert(t('Failed to stop job: ') + (j.error || t('unknown error')));
       }
     } catch (err) {
-      alert('Network error');
+      alert(t('Network error'));
     } finally {
       setLoading(false);
     }
@@ -37,7 +39,7 @@ export default function StopJobButton({ jobId }: { jobId: string }) {
       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
       </svg>
-      {loading ? 'Stopping...' : 'Stop Job'}
+      {loading ? t('Stopping...') : t('Stop Job')}
     </button>
   );
 }

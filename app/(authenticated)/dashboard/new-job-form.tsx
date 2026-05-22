@@ -1,6 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BiInline, useT } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
 
 function isoDaysAgo(days: number) {
   const d = new Date();
@@ -10,6 +12,8 @@ function isoDaysAgo(days: number) {
 const TODAY_ISO = () => new Date().toISOString().slice(0, 10);
 
 export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
+  const t = useT();
+  const { isAr } = useLang();
   const router = useRouter();
   const [target, setTarget]     = useState('');
   const [comps, setComps]       = useState('');
@@ -32,10 +36,10 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
       const s = new Date(dateStart);
       const en = new Date(dateEnd);
       const today = new Date(TODAY_ISO());
-      if (s > en) { setErr('Start date must be before end date.'); return; }
-      if (en > today) { setErr('End date cannot be in the future.'); return; }
+      if (s > en) { setErr(t('Start date must be before end date.')); return; }
+      if (en > today) { setErr(t('End date cannot be in the future.')); return; }
       const months = (en.getFullYear() - s.getFullYear()) * 12 + (en.getMonth() - s.getMonth());
-      if (months > 12) { setErr('Maximum range is 12 months.'); return; }
+      if (months > 12) { setErr(t('Maximum range is 12 months.')); return; }
     }
 
     setSubmitting(true);
@@ -75,7 +79,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" dir={isAr ? 'rtl' : 'ltr'}>
       {err && (
         <div className="bg-rose-50 border border-rose-100 text-rose-700 text-sm font-medium rounded-xl p-4 flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
@@ -84,45 +88,45 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
       )}
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Target / Brand name</label>
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Target / Brand name" /></label>
         <input 
           type="text" 
           required 
           value={target} 
           onChange={e=>setTarget(e.target.value)}
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
-          placeholder="e.g. your brand name"
+          placeholder={t('e.g. your brand name')}
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Competitor names</label>
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Competitor names" /></label>
         <input
           type="text"
           required
           value={comps}
           onChange={e=>setComps(e.target.value)}
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
-          placeholder="e.g. Patchi, Bostani"
+          placeholder={t('e.g. Patchi, Bostani')}
         />
-        <p className="text-[11px] text-slate-400 font-medium ml-1">Brand names only — don&apos;t include the country or city here.</p>
+        <p className="text-[11px] text-slate-400 font-medium ml-1"><BiInline en="Brand names only — don't include the country or city here." /></p>
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Search location</label>
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Search location" /></label>
         <input
           type="text"
           value={location}
           onChange={e=>setLocation(e.target.value)}
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
-          placeholder="e.g. Saudi Arabia, Riyadh, Dubai UAE"
+          placeholder={t('e.g. Saudi Arabia, Riyadh, Dubai UAE')}
         />
-        <p className="text-[11px] text-slate-400 font-medium ml-1">Narrows Google Maps search to this region. Leave empty for worldwide.</p>
+        <p className="text-[11px] text-slate-400 font-medium ml-1"><BiInline en="Narrows Google Maps search to this region. Leave empty for worldwide." /></p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between ml-1">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight">Analysis Window</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight"><BiInline en="Analysis Window" /></label>
           <div className="flex gap-1.5">
             <button type="button" onClick={() => { setDateStart(isoDaysAgo(30)); setDateEnd(TODAY_ISO()); }}
               className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 transition">30d</button>
@@ -136,7 +140,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">From</label>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1"><BiInline en="From" /></label>
             <input
               type="date"
               value={dateStart}
@@ -146,7 +150,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">To</label>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1"><BiInline en="To" /></label>
             <input
               type="date"
               value={dateEnd}
@@ -160,7 +164,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">OAuth Refresh token</label>
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="OAuth Refresh token" /></label>
         <input 
           type="password" 
           required 
@@ -172,14 +176,14 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Report destination</label>
+        <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Report destination" /></label>
         <input 
           type="email" 
           required 
           value={email} 
           onChange={e=>setEmail(e.target.value)}
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
-          placeholder="email@example.com"
+          placeholder={t('email@example.com')}
         />
       </div>
 
@@ -197,9 +201,9 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
           {scheduleMonthly && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
         </div>
         <div>
-          <p className={`font-bold text-sm transition-colors ${scheduleMonthly ? 'text-indigo-900' : 'text-slate-700'}`}>Enable Monthly Recurrence</p>
+          <p className={`font-bold text-sm transition-colors ${scheduleMonthly ? 'text-indigo-900' : 'text-slate-700'}`}><BiInline en="Enable Monthly Recurrence" /></p>
           <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed">
-            Automatically generate a fresh analysis on the 1st of every month.
+            <BiInline en="Automatically generate a fresh analysis on the 1st of every month." />
           </p>
         </div>
       </div>
@@ -209,7 +213,7 @@ export default function NewJobForm({ defaultEmail }: { defaultEmail: string }) {
         disabled={submitting}
         className="w-full btn-primary py-3 shadow-lg shadow-indigo-600/10"
       >
-        {submitting ? 'Initializing Process…' : 'Start Intelligent Analysis'}
+        {submitting ? <BiInline en="Initializing Process…" /> : <BiInline en="Start Intelligent Analysis" />}
       </button>
     </form>
   );

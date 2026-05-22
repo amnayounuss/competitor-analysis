@@ -168,34 +168,119 @@ async function extractViaHover(page) {
     for (const day of DAYS) {
       // Click the day tab if it exists
       await page.evaluate((dayName) => {
-        const buttons = Array.from(document.querySelectorAll('button, [role="tab"]'));
-        // Google uses plural form ("Mondays") as the tab label
-        const dayPlural = dayName.charAt(0) + dayName.slice(1).toLowerCase() + "s";
-        const tab = buttons.find((b) => {
-          const t = (b.textContent || "").trim();
-          return t.toLowerCase() === dayPlural.toLowerCase() ||
-                 t.toLowerCase() === dayName.toLowerCase();
+        const dayMap = {
+          'SUNDAY': ['sunday', 'sundays', 'الأحد', 'الاحد'],
+          'MONDAY': ['monday', 'mondays', 'الاثنين', 'الإثنين'],
+          'TUESDAY': ['tuesday', 'tuesdays', 'الثلاثاء'],
+          'WEDNESDAY': ['wednesday', 'wednesdays', 'الأربعاء', 'الاربعاء'],
+          'THURSDAY': ['thursday', 'thursdays', 'الخميس'],
+          'FRIDAY': ['friday', 'fridays', 'الجمعة'],
+          'SATURDAY': ['saturday', 'saturdays', 'السبت']
+        };
+        const targets = dayMap[dayName] || [];
+        
+        // 1) Find the "Popular times" section header
+        const all = Array.from(document.querySelectorAll("*"));
+        const ptHeader = all.find((e) => {
+          const t = (e.textContent || "").trim();
+          return /^Popular times$/i.test(t) && t.length < 30;
         });
-        if (tab) tab.click();
+
+        // 2) Find buttons/tabs inside the popular times container, or fall back to document
+        const container = ptHeader ? ptHeader.closest('div[class*="section"]') || ptHeader.parentElement : document;
+        const buttons = Array.from(container.querySelectorAll('button, [role="tab"]'));
+        
+        // Strategy A: Find by text content matching English or Arabic terms
+        let tab = buttons.find((b) => {
+          const t = (b.textContent || "").trim().toLowerCase();
+          return targets.some(target => t === target.toLowerCase() || t.includes(target.toLowerCase()));
+        });
+        
+        // Strategy B: Fallback to role="tab" elements by matching index inside the container
+        if (!tab) {
+          const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+          if (tabs.length === 7) {
+            const daysOrder = ["SUNDAY","MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"];
+            const idx = daysOrder.indexOf(dayName);
+            if (idx !== -1 && tabs[idx]) tab = tabs[idx];
+          }
+        }
+
+        // Strategy C: Global search fallback
+        if (!tab) {
+          const globalButtons = Array.from(document.querySelectorAll('button, [role="tab"]'));
+          tab = globalButtons.find((b) => {
+            const t = (b.textContent || "").trim().toLowerCase();
+            return targets.some(target => t === target.toLowerCase() || t.includes(target.toLowerCase()));
+          });
+        }
+        
+        if (tab) {
+          tab.focus();
+          tab.scrollIntoView({ block: "center" });
+
+          // Dispatch mouse events to ensure state changes register
+          const rect = tab.getBoundingClientRect();
+          const clientX = rect.left + rect.width / 2;
+          const clientY = rect.top + rect.height / 2;
+
+          tab.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX, clientY }));
+          tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX, clientY }));
+          tab.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX, clientY }));
+          tab.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX, clientY }));
+          
+          tab.click();
+          
+          tab.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+        return false;
       }, day);
-      await sleep(600);
+      await sleep(1200);
 
       // Read all bars with busyness info
       const hours = await page.evaluate(() => {
         const result = new Array(24).fill(null);
-        // Bars have aria-labels like "0% busy at 5 AM", "50% busy at 8 PM"
+        // Bars have aria-labels like "0% busy at 5 AM", "50% busy at 8 PM", "Currently 45% busy, usually 60% busy at 5 PM", "Currently 45% busy, usually 60% busy"
         const bars = Array.from(document.querySelectorAll('[aria-label*="busy" i]'));
         for (const b of bars) {
           const label = b.getAttribute("aria-label") || "";
-          // "50% busy at 8 PM"  or  "Currently X% busy, usually Y%"
-          const m = label.match(/(\d+)%\s*busy\s*at\s*(\d+)\s*(AM|PM)/i);
-          if (m) {
-            const pct = parseInt(m[1], 10);
-            let h = parseInt(m[2], 10);
-            const ampm = m[3].toUpperCase();
+          
+          let pct = null;
+          let h = null;
+
+          // 1) Match standard and "usually X% busy at Y PM" or "X% busy at Y PM"
+          const m1 = label.match(/(?:usually\s+)?(\d+)%\s*busy\s*at\s*(\d+)\s*(AM|PM)/i);
+          if (m1) {
+            pct = parseInt(m1[1], 10);
+            h = parseInt(m1[2], 10);
+            const ampm = m1[3].toUpperCase();
             if (ampm === "AM" && h === 12) h = 0;
             else if (ampm === "PM" && h !== 12) h += 12;
-            if (h >= 0 && h < 24) result[h] = pct;
+          } 
+          // 2) Match live "Currently X% busy, usually Y% busy at Z PM" (if usually is inside)
+          else {
+            const m2 = label.match(/Currently\s+\d+%\s*busy,\s*usually\s+(\d+)%\s*busy\s*at\s*(\d+)\s*(AM|PM)/i);
+            if (m2) {
+              pct = parseInt(m2[1], 10);
+              h = parseInt(m2[2], 10);
+              const ampm = m2[3].toUpperCase();
+              if (ampm === "AM" && h === 12) h = 0;
+              else if (ampm === "PM" && h !== 12) h += 12;
+            }
+            // 3) Match live "Currently X% busy, usually Y% busy" (without "at Z PM" - current hour)
+            else {
+              const m3 = label.match(/Currently\s+(\d+)%\s*busy(?:,\s*usually\s+(\d+)%\s*busy)?/i);
+              if (m3) {
+                // Use usual busyness if available, otherwise current live level
+                pct = m3[2] ? parseInt(m3[2], 10) : parseInt(m3[1], 10);
+                h = new Date().getHours();
+              }
+            }
+          }
+
+          if (pct !== null && h !== null && h >= 0 && h < 24) {
+            result[h] = pct;
           }
         }
         return result;
@@ -270,10 +355,16 @@ function summarizeGrid(grid) {
 // ─────────────── per-branch orchestrator ───────────────
 
 async function scrapePopularTimesForBranch(page, branch, enableHoverFallback) {
-  const url = branch.placeId
+  let url = branch.placeId
     ? `https://www.google.com/maps/place/?q=place_id:${branch.placeId}`
     : branch.url;
   if (!url) return { available: false, grid: {}, summary: "" };
+
+  if (url.includes("?")) {
+    url += "&hl=en";
+  } else {
+    url += "?hl=en";
+  }
 
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });

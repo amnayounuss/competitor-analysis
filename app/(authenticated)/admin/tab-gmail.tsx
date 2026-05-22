@@ -1,111 +1,99 @@
 'use client';
 import { useState } from 'react';
 
-export default function SmtpTab({ settings, reload }: { settings: any, reload: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<{type:'ok'|'err', text:string}|null>(null);
+export default function ResendTab(props?: any) {
+  const [testEmail, setTestEmail] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testMsg, setTestMsg] = useState<{type:'ok'|'err', text:string}|null>(null);
 
-  // Form state
-  const [host, setHost]   = useState(settings?.smtp_host || '');
-  const [port, setPort]   = useState(settings?.smtp_port || 587);
-  const [user, setUser]   = useState(settings?.smtp_user || '');
-  const [pass, setPass]   = useState(settings?.smtp_pass || '');
-  const [secure, setSecure] = useState(settings?.smtp_secure || false);
-  const [fromName, setFromName] = useState(settings?.smtp_from_name || 'Reports');
-  const [fromEmail, setFromEmail] = useState(settings?.smtp_from_email || '');
-
-  async function save() {
-    setSaving(true); setMsg(null);
-    const r = await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        smtp_host: host,
-        smtp_port: parseInt(port.toString(), 10),
-        smtp_user: user,
-        smtp_pass: pass,
-        smtp_secure: secure,
-        smtp_from_name: fromName,
-        smtp_from_email: fromEmail
-      }),
-    });
-    setSaving(false);
-    if (!r.ok) { setMsg({type:'err', text:'Failed to save SMTP settings'}); return; }
-    setMsg({type:'ok', text:'SMTP settings updated successfully'});
-    reload();
+  async function sendTest() {
+    if (!testEmail) return;
+    setSendingTest(true);
+    setTestMsg(null);
+    try {
+      const r = await fetch('/api/admin/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testEmail }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setTestMsg({ type: 'err', text: data.error || 'Failed to send test email' });
+      } else {
+        setTestMsg({ type: 'ok', text: 'Test email sent successfully via Resend!' });
+      }
+    } catch (err: any) {
+      setTestMsg({ type: 'err', text: err.message || 'An error occurred' });
+    } finally {
+      setSendingTest(false);
+    }
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in fade-in duration-300">
       <div>
-        <h2 className="text-2xl font-black text-slate-900 tracking-tight">Email Configuration</h2>
-        <p className="text-sm text-slate-500 mt-1">Configure SMTP settings to send analysis reports to clients.</p>
+        <h2 className="text-2xl font-black text-slate-900 tracking-tight">Email Gateway (Resend)</h2>
+        <p className="text-sm text-slate-500 mt-1">Verify and test your Resend API dispatch configuration.</p>
       </div>
-
-      {msg && (
-        <div className={`p-4 rounded-xl text-sm font-bold border animate-in fade-in slide-in-from-top-2 ${
-          msg.type === 'ok' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'
-        }`}>
-          {msg.text}
-        </div>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="space-y-6">
-          <Field label="SMTP Host">
-            <input className="modern-input" placeholder="smtp.gmail.com" value={host} onChange={e => setHost(e.target.value)} />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Port">
-              <input className="modern-input" type="number" placeholder="587" value={port} onChange={e => setPort(e.target.value)} />
-            </Field>
-            <div className="flex items-end pb-3">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked={secure} onChange={e => setSecure(e.target.checked)} />
-                <span className="text-xs font-bold text-slate-600 uppercase tracking-widest group-hover:text-indigo-600 transition-colors">SSL/TLS</span>
-              </label>
+          <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+              <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest">Resend Integration Active</h4>
+            </div>
+            <p className="text-xs text-emerald-800/80 leading-relaxed">
+              Your platform is configured to send analysis reports instantly using the **Resend API**. SMTP dependencies have been completely removed.
+            </p>
+            <div className="bg-white/60 border border-emerald-200/50 rounded-2xl p-4 text-[10px] text-emerald-900/80 font-mono">
+              RESEND_API_KEY: Configured in .env
             </div>
           </div>
-          <Field label="SMTP Username">
-            <input className="modern-input" placeholder="user@example.com" value={user} onChange={e => setUser(e.target.value)} />
-          </Field>
-          <Field label="SMTP Password">
-            <input className="modern-input" type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} />
-          </Field>
+
+          <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6 space-y-4 shadow-sm">
+            <div>
+              <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5 text-indigo-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 19v-8.93a2 2 0 01.89-1.664l8-5.333a2 2 0 012.22 0l8 5.333A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-1.14.76a2 2 0 01-2.22 0l-1.14-.76" /></svg>
+                Send Test Email
+              </h4>
+              <p className="text-[11px] text-slate-500 leading-relaxed mt-1">Verify that your Resend API Key is working perfectly by dispatching a live test message.</p>
+            </div>
+            
+            <div className="flex gap-2">
+              <input
+                type="email"
+                placeholder="recipient@example.com"
+                value={testEmail}
+                onChange={e => setTestEmail(e.target.value)}
+                className="modern-input flex-1 py-1.5 text-xs bg-white"
+              />
+              <button
+                onClick={sendTest}
+                disabled={sendingTest || !testEmail}
+                className="btn-primary text-xs px-4 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50"
+              >
+                {sendingTest ? 'Sending...' : 'Test'}
+              </button>
+            </div>
+
+            {testMsg && (
+              <p className={`text-[10px] font-black uppercase tracking-wider ${testMsg.type === 'ok' ? 'text-emerald-600 animate-pulse' : 'text-rose-600'}`}>
+                {testMsg.text}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="space-y-6">
-          <Field label="Sender Name">
-            <input className="modern-input" placeholder="Reports" value={fromName} onChange={e => setFromName(e.target.value)} />
-          </Field>
-          <Field label="Sender Email (Optional)" hint="Leave empty to use SMTP Username">
-            <input className="modern-input" placeholder="reports@company.com" value={fromEmail} onChange={e => setFromEmail(e.target.value)} />
-          </Field>
-
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mt-8">
+          <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Pro Tip</h4>
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              For Gmail, use an <b>App Password</b> instead of your primary password. Ensure your SMTP provider allows connections from your server's IP address.
+              Resend requires a **verified sending domain** to send emails from your own domain. If you are using the free tier or haven't verified a domain, emails will be delivered from <b>onboarding@resend.dev</b>.
             </p>
           </div>
         </div>
       </div>
-
-      <div className="pt-6 border-t border-slate-100 flex justify-end">
-        <button onClick={save} disabled={saving} className="btn-primary px-10">
-          {saving ? 'Saving...' : 'Save Configuration'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
-      {children}
-      {hint && <p className="text-[10px] font-medium text-slate-400 italic">{hint}</p>}
     </div>
   );
 }

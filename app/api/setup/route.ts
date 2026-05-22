@@ -10,14 +10,14 @@ const SetupSchema = z.object({
     full_name: z.string().min(1).optional(),
   }),
   smtp: z.object({
-    host: z.string().min(1),
+    host: z.string().default('resend'),
     port: z.number().int().default(587),
-    user: z.string().min(1),
-    pass: z.string().min(1),
+    user: z.string().default('resend'),
+    pass: z.string().default('resend'),
     secure: z.boolean().default(false),
     from_name: z.string().min(1).default('Reports'),
     from_email: z.string().email().or(z.literal('')).optional(),
-  }),
+  }).default({}),
   gmb: z.object({
     oauth_client_id: z.string().min(10),
     oauth_client_secret: z.string().min(10),

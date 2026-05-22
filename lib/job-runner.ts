@@ -16,6 +16,7 @@ import { notify } from './notifications';
 import { getClientDbCreds, clientDbClient, testClientDb } from './client-db';
 import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
+import { parseAddressesWithClaude, generateAiSummary } from './anthropic';
 
 import {
   fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
@@ -189,6 +190,35 @@ export async function runJob(job: Job): Promise<void> {
       await log('info', `Filtered out ${filteredCount} reviews outside range`);
     }
 
+    // ── AI Branch Naming & City Normalization ──
+    const detectBrand = makeBrandDetector(job.target_name, job.competitors);
+    // Explicitly tag every raw place with its exact brand before we rename them
+    for (const p of rawPlaces) {
+      p.__searchBrand = detectBrand(p);
+    }
+
+    if (process.env.ANTHROPIC_API_KEY && rawPlaces.length > 0) {
+      await checkCancellation();
+      await setProgress(75, 'Stage AI: AI-powered branch naming & city normalization');
+      try {
+        await log('info', `Running AI Address parser for ${rawPlaces.length} locations...`);
+        const parsed = await parseAddressesWithClaude(
+          rawPlaces.map(p => ({ title: p.title || '', address: p.address || '' }))
+        );
+        for (let i = 0; i < rawPlaces.length; i++) {
+          if (parsed[i]) {
+            // Overwrite title with the AI-parsed unique branch name
+            rawPlaces[i].title = parsed[i].branch_name;
+            // Overwrite city
+            rawPlaces[i].city = parsed[i].city;
+          }
+        }
+        await log('info', 'AI Address parser completed successfully.');
+      } catch (err: any) {
+        await log('warn', `AI Address parser failed: ${err.message} — using default names`);
+      }
+    }
+
     const analysis = analyze(rawPlaces, cfg);
     writeWorkbook(analysis, cfg);
     writeReport(analysis, cfg);
@@ -253,6 +283,25 @@ export async function runJob(job: Job): Promise<void> {
       duration_sec: job.started_at ? Math.round((Date.now() - new Date(job.started_at).getTime()) / 1000) : null,
     }, { onConflict: 'job_id' });
 
+    // ── Generate AI Summary ──
+    let aiSummary: string | null = null;
+    if (process.env.ANTHROPIC_API_KEY) {
+      await checkCancellation();
+      await setProgress(98, 'Generating AI executive summary');
+      try {
+        await log('info', 'Generating AI Executive Summary...');
+        aiSummary = await generateAiSummary(
+          job.target_name,
+          job.competitors,
+          analysis.brandRows || [],
+          analysis.branchRows || []
+        );
+        await log('info', 'AI Executive Summary generated successfully');
+      } catch (err: any) {
+        await log('warn', `Failed to generate AI summary: ${err.message}`);
+      }
+    }
+
     // ── Mark done in admin DB ──
     await sb.from('jobs').update({
       status: 'succeeded', progress_pct: 100, current_stage: 'Done',
@@ -260,6 +309,7 @@ export async function runJob(job: Job): Promise<void> {
       excel_url, report_url,
       branches_total: rawPlaces.length,
       reviews_total: reviewsTotal,
+      ai_summary: aiSummary,
     }).eq('id', job.id);
 
     await notify({
@@ -326,7 +376,7 @@ async function pushDataToClientDb(
     job_id: jobId,
     brand: detectBrand(p),
     branch_name: p.title || '(unknown)',
-    city: extractCity(p.address),
+    city: p.city || extractCity(p.address),
     address: p.address,
     phone: p.phone || null,
     website: p.website || null,
@@ -334,7 +384,7 @@ async function pushDataToClientDb(
     stars: Number(p.rating) || avgFromReviews(p.reviews),
     reviews_count: p.reviewsCount || p.reviews_count || p.reviews?.length || 0,
     popular_times: p.popularTimes?.grid || p.popular_times || null,
-    is_target: targetSet.has(p.title),
+    is_target: detectBrand(p) === job.target_name,
   }));
 
   const { data: insertedBranches, error: branchErr } = await cdb

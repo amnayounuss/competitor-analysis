@@ -3,10 +3,14 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { browserClient } from '@/lib/supabase';
 import Link from 'next/link';
+import { Bi, BiInline, useT } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
 
 export default function SignupForm() {
   const sb = browserClient();
   const router = useRouter();
+  const t = useT();
+  const { isAr } = useLang();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -29,7 +33,7 @@ export default function SignupForm() {
 
     if (error) {
       if (error.message.toLowerCase().includes('already been registered')) {
-        setErr('This email is already registered. Please sign in instead.');
+        setErr(t('This email is already registered. Please sign in instead.'));
       } else {
         setErr(error.message);
       }
@@ -37,23 +41,22 @@ export default function SignupForm() {
     }
 
     if (data.session) {
-      // New client always needs DB setup — skip the bounce through /dashboard
       router.push('/connect-database');
     } else {
-      setMsg('Check your email to confirm your account, then sign in.');
+      setMsg(t('Check your email to confirm your account, then sign in.'));
     }
   }
 
   return (
-    <div className="w-full max-w-[440px] relative z-10 py-12">
+    <div className="w-full max-w-[440px] relative z-10 py-12" dir={isAr ? 'rtl' : 'ltr'}>
       <div className="text-center mb-10">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/30 mb-6 group transition-transform hover:-rotate-6">
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
           </svg>
         </div>
-        <h1 className="text-4xl font-bold tracking-tight text-slate-900">Start Analyzing</h1>
-        <p className="text-slate-500 mt-2 font-medium">Create your professional account today</p>
+        <Bi en="Start Analyzing" as="h1" className="text-4xl font-bold tracking-tight text-slate-900" />
+        <Bi en="Create your professional account today" as="p" className="text-slate-500 mt-2 font-medium" />
       </div>
 
       <form onSubmit={onSubmit} className="modern-card p-10 space-y-6">
@@ -71,37 +74,37 @@ export default function SignupForm() {
         )}
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Full name</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Full name" /></label>
           <input 
             type="text" 
             value={fullName} 
             onChange={e => setFullName(e.target.value)}
-            placeholder="John Doe"
+            placeholder={t('John Doe')}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Email address</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Email address" /></label>
           <input 
             type="email" 
             required 
             value={email} 
             onChange={e => setEmail(e.target.value)}
-            placeholder="john@example.com"
+            placeholder={t('john@example.com')}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Password</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Password" /></label>
           <input 
             type="password" 
             required 
             minLength={8} 
             value={password} 
             onChange={e => setPassword(e.target.value)}
-            placeholder="Min. 8 characters"
+            placeholder={t('Min. 8 characters')}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
           />
         </div>
@@ -114,20 +117,21 @@ export default function SignupForm() {
           {loading ? (
             <span className="flex items-center justify-center gap-2">
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Creating Account...
+              <BiInline en="Creating Account..." />
             </span>
-          ) : 'Get Started Now'}
+          ) : <BiInline en="Get Started Now" />}
         </button>
 
         <div className="pt-4 text-center">
           <p className="text-sm text-slate-500 font-medium">
-            Already have an account? <Link href="/login" className="text-indigo-600 font-bold hover:underline">Sign in instead</Link>
+            <BiInline en="Already have an account?" />{' '}
+            <Link href="/login" className="text-indigo-600 font-bold hover:underline"><BiInline en="Sign in instead" /></Link>
           </p>
         </div>
       </form>
 
       <p className="mt-8 text-center text-xs text-slate-400 font-medium tracking-wide uppercase">
-        &copy; 2026 Reviews Analytics &bull; Secure Signup
+        &copy; 2026 <BiInline en="Reviews Analytics" /> &bull; <BiInline en="Secure Signup" />
       </p>
     </div>
   );

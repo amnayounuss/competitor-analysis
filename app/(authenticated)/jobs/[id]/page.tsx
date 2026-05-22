@@ -1,9 +1,11 @@
+import React from 'react';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { serverClient, adminClient } from '@/lib/supabase';
 import { getClientDbCreds, clientDbClient } from '@/lib/client-db';
 import LiveJobView from './live-job-view';
 import DashboardView from '@/app/(authenticated)/dashboard/dashboard-view';
+import { BiInline } from '@/lib/bilingual';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +33,8 @@ export default async function JobPage({ params }: { params: { id: string } }) {
     dateStart: string | null;
     dateEnd: string | null;
     finishedAt: string | null;
+    aiSummary: string | null;
+    allJobs: any[];
   } | null = null;
 
   if (job.status === 'succeeded') {
@@ -38,13 +42,33 @@ export default async function JobPage({ params }: { params: { id: string } }) {
       const creds = await getClientDbCreds(user.id);
       const cdb = clientDbClient(creds);
 
+      // Fetch all succeeded jobs for the switcher
+      const { data: allSucceededJobs } = await admin
+        .from('jobs')
+        .select('id, target_name, competitors, date_start, date_end, finished_at, search_location')
+        .eq('user_id', user.id)
+        .eq('status', 'succeeded')
+        .order('finished_at', { ascending: false });
+
       const [analyticsRes, analysesRes] = await Promise.all([
-        cdb.from('branch_analytics').select('*').eq('job_id', job.id),
+        cdb.from('branch_analytics').select('*, branches(stars, reviews_count)').eq('job_id', job.id),
         cdb.from('analyses').select('*').eq('job_id', job.id),
       ]);
 
+      const searchLoc = job.search_location ? job.search_location.trim().toLowerCase() : '';
+      const rawAnalytics = analyticsRes.data || [];
+      const filteredAnalytics = rawAnalytics.filter(a => {
+        if (!searchLoc) return true; // Keep all if no search location specified
+
+        const addr = (a.address || '').toLowerCase();
+        const city = (a.city || '').toLowerCase();
+        const title = (a.branch_name || '').toLowerCase();
+
+        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc);
+      });
+
       dashboardData = {
-        analytics: analyticsRes.data || [],
+        analytics: filteredAnalytics,
         analyses: analysesRes.data || [],
         targetBrand: job.target_name,
         competitorBrands: Array.isArray(job.competitors) ? job.competitors : [],
@@ -52,6 +76,8 @@ export default async function JobPage({ params }: { params: { id: string } }) {
         dateStart: job.date_start || null,
         dateEnd: job.date_end || null,
         finishedAt: job.finished_at || null,
+        aiSummary: job.ai_summary || null,
+        allJobs: allSucceededJobs || [],
       };
     } catch (err) {
       console.error('[job-dashboard] failed to fetch client data:', err);
@@ -70,18 +96,25 @@ export default async function JobPage({ params }: { params: { id: string } }) {
       <div className="flex items-center justify-between">
         <Link href="/dashboard" className="group flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-indigo-600 transition-all">
           <div className="p-2 rounded-lg bg-white border border-slate-100 shadow-sm group-hover:border-indigo-100 group-hover:shadow-indigo-500/10 transition-all">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            <svg className="w-4 h-4 rtl:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
           </div>
-          Command Center
+          <BiInline en="Command Center" />
         </Link>
       </div>
 
       {job.status === 'succeeded' && dashboardData ? (
         <div className="px-4 sm:px-10 py-10 space-y-10">
           <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Executive Overview</h1>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight"><BiInline en="Executive Overview" /></h1>
             <p className="text-slate-500 font-medium mt-1 text-sm">
-              {job.target_name} vs {(Array.isArray(job.competitors) ? job.competitors : []).join(', ')}
+              <BiInline en={job.target_name} />{' '}
+              <BiInline en="vs" />{' '}
+              {(Array.isArray(job.competitors) ? job.competitors : []).map((c: string, idx: number) => (
+                <React.Fragment key={idx}>
+                  {idx > 0 && ', '}
+                  <BiInline en={c} />
+                </React.Fragment>
+              ))}
             </p>
           </div>
           <DashboardView data={dashboardData} />

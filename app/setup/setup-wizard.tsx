@@ -1,37 +1,30 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BiInline, useT } from '@/lib/bilingual';
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 export default function SetupWizard() {
   const router = useRouter();
+  const t = useT();
   const [step, setStep] = useState<Step>(1);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Step 1
+  // Step 1 - Admin Identity
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminName, setAdminName] = useState('');
 
-  // Step 2 — SMTP
-  const [smtpHost, setSmtpHost] = useState('');
-  const [smtpPort, setSmtpPort] = useState(587);
-  const [smtpUser, setSmtpUser] = useState('');
-  const [smtpPass, setSmtpPass] = useState('');
-  const [smtpSecure, setSmtpSecure] = useState(false);
-  const [smtpFromName, setSmtpFromName] = useState('Reviews Analytics');
-  const [smtpFromEmail, setSmtpFromEmail] = useState('');
-
-  // Step 3 — GMB
+  // Step 2 — GMB Integration
   const [gmbClientId, setGmbClientId] = useState('');
   const [gmbClientSecret, setGmbClientSecret] = useState('');
 
-  // Step 4 — Preferences
+  // Step 3 — Platform Security Defaults
   const [signupAllowed, setSignupAllowed] = useState(true);
 
-  function next() { setErr(null); if (step < 5) setStep((step + 1) as Step); }
+  function next() { setErr(null); if (step < 4) setStep((step + 1) as Step); }
   function back() { setErr(null); if (step > 1) setStep((step - 1) as Step); }
 
   async function finish() {
@@ -44,13 +37,12 @@ export default function SetupWizard() {
         body: JSON.stringify({
           admin: { email: adminEmail.trim(), password: adminPassword, full_name: adminName.trim() },
           smtp: {
-            host: smtpHost.trim(),
-            port: parseInt(smtpPort.toString(), 10),
-            user: smtpUser.trim(),
-            pass: smtpPass,
-            secure: smtpSecure,
-            from_name: smtpFromName.trim(),
-            from_email: smtpFromEmail.trim() || undefined,
+            host: 'resend',
+            port: 587,
+            user: 'resend',
+            pass: 'resend',
+            secure: false,
+            from_name: 'Reviews Analytics',
           },
           gmb: {
             oauth_client_id: gmbClientId.trim(),
@@ -71,8 +63,7 @@ export default function SetupWizard() {
 
   function canProceed(): boolean {
     if (step === 1) return adminEmail.includes('@') && adminPassword.length >= 8;
-    if (step === 2) return smtpHost.length > 3 && smtpUser.length > 2 && smtpPass.length > 0;
-    if (step === 3) return gmbClientId.length > 10 && gmbClientSecret.length > 10;
+    if (step === 2) return gmbClientId.length > 10 && gmbClientSecret.length > 10;
     return true;
   }
 
@@ -80,10 +71,10 @@ export default function SetupWizard() {
     <div className="w-full max-w-2xl modern-card p-10 space-y-10 animate-in fade-in zoom-in-95 duration-500">
       <header>
         <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100 mb-4">
-          Initial Provisioning
+          <BiInline en="Initial Provisioning" />
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome — Initial Setup</h1>
-        <p className="text-sm font-medium text-slate-500 mt-1">Configure your core systems and administrative identity.</p>
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight"><BiInline en="Welcome — Initial Setup" /></h1>
+        <p className="text-sm font-medium text-slate-500 mt-1"><BiInline en="Configure your core systems and administrative identity." /></p>
         <Stepper current={step} />
       </header>
 
@@ -96,16 +87,16 @@ export default function SetupWizard() {
 
       <div className="min-h-[320px]">
         {step === 1 && (
-          <Section title="Identity Management" hint="Define your primary administrative credentials.">
-            <Field label="Full Name (optional)">
+          <Section title={t('Identity Management')} hint={t('Define your primary administrative credentials.')}>
+            <Field label={t('Full Name (optional)')}>
               <input type="text" value={adminName} onChange={e => setAdminName(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="John Doe" />
             </Field>
-            <Field label="Root Email Address *">
+            <Field label={t('Root Email Address *')}>
               <input type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="[email protected]" />
             </Field>
-            <Field label="Secure Password *" hint="Minimum 8 characters required">
+            <Field label={t('Secure Password *')} hint={t('Minimum 8 characters required')}>
               <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" minLength={8} placeholder="••••••••" />
             </Field>
@@ -113,67 +104,24 @@ export default function SetupWizard() {
         )}
 
         {step === 2 && (
-          <Section title="Communication Layer" hint="Configure SMTP for automated report delivery.">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="SMTP Host *">
-                <input type="text" value={smtpHost} onChange={e => setSmtpHost(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="smtp.gmail.com" />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Port">
-                  <input type="number" value={smtpPort} onChange={e => setSmtpPort(parseInt(e.target.value, 10))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
-                </Field>
-                <div className="flex items-end pb-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={smtpSecure} onChange={e => setSmtpSecure(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" />
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">SSL/TLS</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="SMTP Username *">
-                <input type="text" value={smtpUser} onChange={e => setSmtpUser(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="user@example.com" />
-              </Field>
-              <Field label="SMTP Password *">
-                <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="••••••••" />
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Sender Name">
-                <input type="text" value={smtpFromName} onChange={e => setSmtpFromName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
-              </Field>
-              <Field label="Sender Email" hint="Optional — defaults to username">
-                <input type="email" value={smtpFromEmail} onChange={e => setSmtpFromEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all" />
-              </Field>
-            </div>
-          </Section>
-        )}
-
-        {step === 3 && (
-          <Section title="Intelligence Engine" hint="Configure Google Business Profile API for data extraction.">
+          <Section title={t('Intelligence Engine')} hint={t('Configure Google Business Profile API for data extraction.')}>
             <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-[11px] text-emerald-900/80 leading-relaxed mb-6 italic">
               Required scope: <code className="bg-white/60 px-1 rounded font-bold">.../auth/business.manage</code>. This project acts as the orchestrator for client-provided tokens.
             </div>
             
-            <Field label="GMB Client ID *">
+            <Field label={t('GMB Client ID *')}>
               <input type="text" value={gmbClientId} onChange={e => setGmbClientId(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="xxxxx.apps.googleusercontent.com" />
             </Field>
-            <Field label="GMB Client Secret *">
+            <Field label={t('GMB Client Secret *')}>
               <input type="password" value={gmbClientSecret} onChange={e => setGmbClientSecret(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all" placeholder="GOCSPX-..." />
             </Field>
           </Section>
         )}
 
-        {step === 4 && (
-          <Section title="Environment Controls" hint="Configure platform-wide security defaults.">
+        {step === 3 && (
+          <Section title={t('Environment Controls')} hint={t('Configure platform-wide security defaults.')}>
             <div 
               onClick={() => setSignupAllowed(!signupAllowed)}
               className={`group relative flex items-start gap-4 p-5 rounded-2xl border transition-all cursor-pointer select-none ${
@@ -188,34 +136,30 @@ export default function SetupWizard() {
                 {signupAllowed && <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
               </div>
               <div>
-                <p className={`font-bold text-sm transition-colors ${signupAllowed ? 'text-indigo-900' : 'text-slate-700'}`}>Allow Public Registration</p>
+                <p className={`font-bold text-sm transition-colors ${signupAllowed ? 'text-indigo-900' : 'text-slate-700'}`}><BiInline en="Allow Public Registration" /></p>
                 <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed">
-                  When enabled, any visitor can create an account. Disable this to restrict access to manually provisioned users only.
+                  <BiInline en="When enabled, any visitor can create an account. Disable this to restrict access to manually provisioned users only." />
                 </p>
               </div>
             </div>
           </Section>
         )}
 
-        {step === 5 && (
-          <Section title="Final Verification" hint="Review your configuration before committing.">
+        {step === 4 && (
+          <Section title={t('Final Verification')} hint={t('Review your configuration before committing.')}>
             <div className="modern-card bg-slate-50/50 border-slate-100 p-6 space-y-4">
               <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin Node</span>
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Admin Node" /></span>
                 <span className="text-sm font-bold text-slate-900">{adminEmail}</span>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">SMTP Gateway</span>
-                <span className="text-sm font-bold text-slate-900">{smtpHost}</span>
-              </div>
-              <div className="flex items-center justify-between py-2 border-b border-slate-100">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">GMB Engine</span>
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest"><BiInline en="GMB Engine" /></span>
                 <span className="text-sm font-bold text-slate-900 truncate max-w-[200px]">{gmbClientId}</span>
               </div>
               <div className="flex items-center justify-between py-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Public Access</span>
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Public Access" /></span>
                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-tighter ${signupAllowed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                  {signupAllowed ? 'Permitted' : 'Restricted'}
+                  {signupAllowed ? t('Permitted') : t('Restricted')}
                 </span>
               </div>
             </div>
@@ -229,16 +173,16 @@ export default function SetupWizard() {
           disabled={step === 1 || submitting}
           className="px-6 py-2.5 text-sm font-bold text-slate-400 hover:text-slate-900 disabled:opacity-0 transition-all uppercase tracking-widest"
         >
-          Previous
+          <BiInline en="Previous" />
         </button>
         
-        {step < 5 ? (
+        {step < 4 ? (
           <button 
             onClick={next} 
             disabled={!canProceed()}
             className="btn-primary px-10 shadow-xl shadow-indigo-600/20"
           >
-            Continue
+            <BiInline en="Continue" />
           </button>
         ) : (
           <button 
@@ -246,7 +190,7 @@ export default function SetupWizard() {
             disabled={submitting}
             className="btn-primary bg-emerald-600 hover:bg-emerald-700 px-10 shadow-xl shadow-emerald-600/20"
           >
-            {submitting ? 'Finalizing Configuration…' : 'Initialize Platform'}
+            {submitting ? <BiInline en="Finalizing Configuration…" /> : <BiInline en="Initialize Platform" />}
           </button>
         )}
       </footer>
@@ -255,7 +199,7 @@ export default function SetupWizard() {
 }
 
 function Stepper({ current }: { current: number }) {
-  const labels = ['Admin', 'SMTP', 'GMB', 'Prefs', 'Confirm'];
+  const labels = ['Admin', 'GMB', 'Prefs', 'Confirm'];
   return (
     <div className="flex items-center gap-1.5 mt-8 w-full">
       {labels.map((label, i) => {
@@ -270,7 +214,7 @@ function Stepper({ current }: { current: number }) {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
               ) : n}
             </div>
-            {n < 5 && <div className={`flex-1 h-1 rounded-full transition-all duration-700 ${done ? 'bg-emerald-500' : 'bg-slate-100'}`} />}
+            {n < 4 && <div className={`flex-1 h-1 rounded-full transition-all duration-700 ${done ? 'bg-emerald-500' : 'bg-slate-100'}`} />}
           </div>
         );
       })}

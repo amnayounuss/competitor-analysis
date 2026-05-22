@@ -1,7 +1,10 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Bi, BiInline, useT } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
 
 interface BranchAnalytics {
   id: string;
@@ -35,6 +38,17 @@ interface BranchAnalytics {
   popular_times_grid: Record<string, (number | null)[]> | null;
   date_start: string | null;
   date_end: string | null;
+  branches?: {
+    stars: number;
+    reviews_count: number;
+  } | null;
+}
+
+function getBranchRating(a: BranchAnalytics): number {
+  if (a.branches && typeof a.branches === 'object' && a.branches.stars != null) {
+    return Number(a.branches.stars);
+  }
+  return a.avg_rating_period ?? 0;
 }
 
 interface Analysis {
@@ -59,7 +73,10 @@ interface DashboardProps {
     dateStart: string | null;
     dateEnd: string | null;
     finishedAt: string | null;
+    aiSummary?: string | null;
+    allJobs?: any[];
   };
+  isGlobalDashboard?: boolean;
 }
 
 const PALETTE = ['#4F46E5', '#10B981', '#EF4444', '#F59E0B', '#0EA5E9', '#A855F7', '#EC4899', '#14B8A6'];
@@ -76,11 +93,53 @@ function fmtDate(iso?: string | null) {
   return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function hourLabel(h: number) {
+function hourLabel(h: number, isAr?: boolean) {
+  if (isAr) {
+    if (h === 0) return '١٢ ص';
+    if (h < 12) return `${formatArabicDigits(h, true)} ص`;
+    if (h === 12) return '١٢ م';
+    return `${formatArabicDigits(h - 12, true)} م`;
+  }
   if (h === 0) return '12a';
   if (h < 12) return `${h}a`;
   if (h === 12) return '12p';
   return `${h - 12}p`;
+}
+
+// Helper to clean up generic branch names (e.g. "Anoosh") to street/district names from address
+export function getBranchDisplayName(a: { branch_name: string; brand: string; address?: string | null }) {
+  const name = (a.branch_name || '').trim();
+  const brand = (a.brand || '').trim();
+
+  if (
+    !name ||
+    name === 'Unknown' ||
+    name === '(unknown)' ||
+    name.toLowerCase() === brand.toLowerCase() ||
+    name.toLowerCase().includes(brand.toLowerCase() + ' branch') ||
+    name.toLowerCase() === 'انوش' ||
+    name.toLowerCase() === 'bostani'
+  ) {
+    if (a.address) {
+      const parts = a.address.split(',').map(s => s.trim()).filter(Boolean);
+      if (parts.length > 0) {
+        const brandKeywords = [brand.toLowerCase(), 'انوش', 'bostani', 'بستاني', 'saudi arabia', 'sa', 'الرياض', 'riyadh', 'jeddah', 'جدة', 'الدمام', 'dammam'];
+        const cleanParts = parts.filter(p => {
+          const lp = p.toLowerCase();
+          return !brandKeywords.some(k => lp === k || lp.includes(k));
+        });
+
+        if (cleanParts.length > 0) {
+          if (cleanParts[0].length < 10 && cleanParts[1]) {
+            return `${cleanParts[0]}, ${cleanParts[1]}`;
+          }
+          return cleanParts[0];
+        }
+      }
+      return a.address.length > 30 ? a.address.slice(0, 27) + '...' : a.address;
+    }
+  }
+  return name;
 }
 
 // ── Brand-level aggregation ──
@@ -96,6 +155,8 @@ interface BrandSummary {
   currentPeriodReviews: number;
   currentPeriodAvg: number | null;
   color: string;
+  dateStart?: string | null;
+  dateEnd?: string | null;
 }
 
 function buildBrandSummaries(
@@ -114,6 +175,8 @@ function buildBrandSummaries(
     m2r: number; m2s: number; m2w: number;
     m3r: number; m3s: number; m3w: number;
     count: number;
+    dateStart: string | null;
+    dateEnd: string | null;
   }> = {};
 
   for (const a of analytics) {
@@ -122,13 +185,16 @@ function buildBrandSummaries(
       s5: 0, s4: 0, s3: 0, s2: 0, s1: 0,
       m1r: 0, m1s: 0, m1w: 0, m2r: 0, m2s: 0, m2w: 0, m3r: 0, m3s: 0, m3w: 0,
       count: 0,
+      dateStart: a.date_start || null,
+      dateEnd: a.date_end || null,
     };
     const x = acc[a.brand];
     x.count++;
     x.reviews += a.total_reviews_period;
-    if (a.avg_rating_period != null) {
-      x.ratingSum += a.avg_rating_period * a.total_reviews_period;
-      x.ratingWeight += a.total_reviews_period;
+    const branchRating = getBranchRating(a);
+    if (branchRating > 0) {
+      x.ratingSum += branchRating;
+      x.ratingWeight += 1;
     }
     x.s5 += a.star_5_count; x.s4 += a.star_4_count;
     x.s3 += a.star_3_count; x.s2 += a.star_2_count; x.s1 += a.star_1_count;
@@ -162,6 +228,8 @@ function buildBrandSummaries(
       currentPeriodReviews: x.m1r,
       currentPeriodAvg: x.m1w > 0 ? +(x.m1s / x.m1w).toFixed(2) : null,
       color: colorMap[brand],
+      dateStart: x.dateStart,
+      dateEnd: x.dateEnd,
     });
   }
 
@@ -191,10 +259,11 @@ function buildCityBreakdown(analytics: BranchAnalytics[], brandSummaries: BrandS
     const x = brands.get(a.brand)!;
     x.count++;
     x.reviews += a.total_reviews_period;
-    if (a.avg_rating_period != null) { x.rSum += a.avg_rating_period * a.total_reviews_period; x.rW += a.total_reviews_period; }
+    const branchRating = getBranchRating(a);
+    if (branchRating > 0) { x.rSum += branchRating; x.rW += 1; }
   }
 
-  return Array.from(cities.entries())
+  const result = Array.from(cities.entries())
     .map(([city, brands]) => ({
       city,
       brands: Array.from(brands.entries()).map(([brand, x]) => ({
@@ -207,13 +276,120 @@ function buildCityBreakdown(analytics: BranchAnalytics[], brandSummaries: BrandS
       totalBranches: Array.from(brands.values()).reduce((s, x) => s + x.count, 0),
     }))
     .sort((a, b) => b.totalBranches - a.totalBranches);
+
+  return result;
 }
 
+function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
+  if (!start && !end) return 'All Time';
+  const opt: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+  const sStr = start ? new Date(start).toLocaleDateString(undefined, opt) : '';
+  const eStr = end ? new Date(end).toLocaleDateString(undefined, opt) : '';
+  if (sStr && eStr) return `${sStr} - ${eStr}`;
+  return sStr || eStr || 'All Time';
+}
 
-export default function DashboardView({ data }: DashboardProps) {
-  const { analytics, targetBrand, competitorBrands, dateStart, dateEnd } = data;
+function formatArabicDigits(val: string | number, isAr: boolean, options?: { decimals?: number }) {
+  const str = typeof val === 'number' 
+    ? (options?.decimals !== undefined ? val.toFixed(options.decimals) : String(val))
+    : val;
+  return str;
+}
+
+export default function DashboardView({ data, isGlobalDashboard = false }: DashboardProps) {
+  const { analytics, targetBrand, competitorBrands, dateStart, dateEnd, jobId, aiSummary: initialAiSummary, allJobs = [] } = data;
+  const router = useRouter();
+  const t = useT();
+  const { isAr } = useLang();
+  const tn = (val: string | number, options?: { decimals?: number }) => formatArabicDigits(val, isAr, options);
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+
+  // AI summary states
+  const [aiSummary, setAiSummary] = useState<string | null>(initialAiSummary || null);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleRegenerateSummary = async () => {
+    if (!jobId) return;
+    setIsGeneratingAi(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/jobs/ai-summary', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.error || 'Failed to regenerate summary');
+      }
+      setAiSummary(resData.aiSummary);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'An unexpected error occurred');
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const handleCopySummary = () => {
+    if (!aiSummary) return;
+    navigator.clipboard.writeText(aiSummary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Resend email states
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [emailToInput, setEmailToInput] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [emailErrorMsg, setEmailErrorMsg] = useState('');
+
+  const currentJob = allJobs?.find(j => j.id === jobId);
+
+  React.useEffect(() => {
+    if (isEmailModalOpen && currentJob?.email_to) {
+      setEmailToInput(currentJob.email_to);
+      setEmailStatus('idle');
+      setEmailErrorMsg('');
+    }
+  }, [isEmailModalOpen, currentJob]);
+
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!jobId || !emailToInput.trim()) return;
+
+    setIsSendingEmail(true);
+    setEmailStatus('idle');
+    setEmailErrorMsg('');
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/resend-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailToInput.trim() }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.error || 'Failed to send email.');
+      }
+
+      setEmailStatus('success');
+      setTimeout(() => {
+        setIsEmailModalOpen(false);
+      }, 2000);
+    } catch (err: any) {
+      setEmailStatus('error');
+      setEmailErrorMsg(err.message || 'An unexpected error occurred.');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
   const [filterBrand, setFilterBrand] = useState('All');
   const [filterCity, setFilterCity] = useState('All');
   const [search, setSearch] = useState('');
@@ -250,12 +426,35 @@ export default function DashboardView({ data }: DashboardProps) {
     [analytics, brandSummaries],
   );
 
-  const periodLabel = useMemo(() => {
-    if (dateStart && dateEnd) return `${fmtDate(dateStart)} → ${fmtDate(dateEnd)}`;
-    const s = analytics.find(a => a.date_start)?.date_start;
-    const e = analytics.find(a => a.date_end)?.date_end;
-    if (s && e) return `${fmtDate(s)} → ${fmtDate(e)}`;
-    return 'Last 90 days';
+  const periodInfo = useMemo(() => {
+    const s = dateStart || analytics.find(a => a.date_start)?.date_start || null;
+    const e = dateEnd || analytics.find(a => a.date_end)?.date_end || null;
+    if (!s || !e) return {
+      label: 'Last 90 days', totalDays: 90,
+      p1: { label: 'Recent (30 days)', short: 'Recent 30d' },
+      p2: { label: 'Middle (30 days)', short: 'Mid 30d' },
+      p3: { label: 'Oldest (30 days)', short: 'Old 30d' },
+    };
+    const startD = new Date(s), endD = new Date(e);
+    const totalMs = endD.getTime() - startD.getTime();
+    const totalDays = Math.max(1, Math.round(totalMs / 86400000));
+    const thirdMs = totalMs / 3;
+    const p3Start = startD;
+    const p3End = new Date(startD.getTime() + thirdMs);
+    const p2Start = p3End;
+    const p2End = new Date(startD.getTime() + 2 * thirdMs);
+    const p1Start = p2End;
+    const p1End = endD;
+    const thirdDays = Math.round(totalDays / 3);
+    const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const fmtFull = (d: Date) => d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    return {
+      label: `${fmtFull(startD)} → ${fmtFull(endD)}`,
+      totalDays,
+      p1: { label: `${fmt(p1Start)} – ${fmt(p1End)} (${thirdDays}d)`, short: `${fmt(p1Start)} – ${fmt(p1End)}` },
+      p2: { label: `${fmt(p2Start)} – ${fmt(p2End)} (${thirdDays}d)`, short: `${fmt(p2Start)} – ${fmt(p2End)}` },
+      p3: { label: `${fmt(p3Start)} – ${fmt(p3End)} (${thirdDays}d)`, short: `${fmt(p3Start)} – ${fmt(p3End)}` },
+    };
   }, [analytics, dateStart, dateEnd]);
 
   const filteredBranches = useMemo(() => {
@@ -263,14 +462,14 @@ export default function DashboardView({ data }: DashboardProps) {
     let list = analytics.filter(a => {
       if (filterBrand !== 'All' && a.brand !== filterBrand) return false;
       if (filterCity !== 'All' && a.city !== filterCity) return false;
-      if (q && !`${a.branch_name} ${a.city || ''} ${a.address || ''}`.toLowerCase().includes(q)) return false;
+      if (q && !`${getBranchDisplayName(a)} ${a.city || ''} ${a.address || ''}`.toLowerCase().includes(q)) return false;
       return true;
     });
     list = [...list].sort((a, b) => {
       let cmp = 0;
-      if (sortCol === 'rating') cmp = (a.avg_rating_period ?? 0) - (b.avg_rating_period ?? 0);
+      if (sortCol === 'rating') cmp = getBranchRating(a) - getBranchRating(b);
       else if (sortCol === 'reviews') cmp = a.total_reviews_period - b.total_reviews_period;
-      else cmp = a.branch_name.localeCompare(b.branch_name);
+      else cmp = getBranchDisplayName(a).localeCompare(getBranchDisplayName(b));
       return sortAsc ? cmp : -cmp;
     });
     return list;
@@ -283,8 +482,8 @@ export default function DashboardView({ data }: DashboardProps) {
 
   const rankings = useMemo(() =>
     [...analytics]
-      .filter(a => a.total_reviews_period > 0 && a.avg_rating_period != null)
-      .sort((a, b) => (b.avg_rating_period! - a.avg_rating_period!) || (b.total_reviews_period - a.total_reviews_period)),
+      .filter(a => getBranchRating(a) > 0)
+      .sort((a, b) => (getBranchRating(b) - getBranchRating(a)) || (b.total_reviews_period - a.total_reviews_period)),
     [analytics],
   );
 
@@ -310,10 +509,10 @@ export default function DashboardView({ data }: DashboardProps) {
         <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center text-slate-300 mx-auto mb-6">
           <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
         </div>
-        <h3 className="text-xl font-black text-slate-900 mb-2">No Data Yet</h3>
-        <p className="text-slate-500 font-medium mb-8 max-w-sm mx-auto">Run your first analysis to see branch-wise comparisons here.</p>
+        <Bi en="No Data Yet" as="h3" className="text-xl font-black text-slate-900 mb-2" />
+        <Bi en="Run your first analysis to see branch-wise comparisons here." as="p" className="text-slate-500 font-medium mb-8 max-w-sm mx-auto" />
         <Link href="/dashboard/new" className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-500/20">
-          Start Analysis
+          <BiInline en="Start Analysis" />
         </Link>
       </div>
     );
@@ -322,72 +521,542 @@ export default function DashboardView({ data }: DashboardProps) {
   const ratingGap = (targetSummary?.avgRating ?? 0) - compAvgRating;
   const isAhead = ratingGap >= 0;
 
-  return (
-    <div className="space-y-8 pb-20 animate-in fade-in duration-700">
+  const reportRef = useRef<HTMLDivElement>(null);
 
-      {/* ═══ TAB NAVIGATION ═══ */}
-      <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl">
-        {([
-          { key: 'overview' as Tab, label: 'Overview' },
-          { key: 'branches' as Tab, label: 'Branch Data' },
-          { key: 'rankings' as Tab, label: 'Rankings' },
-          { key: 'popular-times' as Tab, label: 'Popular Times' },
-        ]).map(tab => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeTab === tab.key
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}>
-            {tab.label}
-          </button>
-        ))}
+  const handleExportPDF = useCallback(() => {
+    // Temporarily expand all tabs for print
+    const originalTab = activeTab;
+    const style = document.createElement('style');
+    style.id = 'print-all-tabs';
+    style.textContent = `
+      @media print {
+        body * { visibility: hidden; }
+        #dashboard-report, #dashboard-report * { visibility: visible; }
+        #dashboard-report { position: absolute; left: 0; top: 0; width: 100%; }
+        .no-print { display: none !important; }
+        .print\\:block { display: block !important; }
+      }
+    `;
+    document.head.appendChild(style);
+    window.print();
+    setTimeout(() => {
+      document.getElementById('print-all-tabs')?.remove();
+    }, 500);
+  }, [activeTab]);
+
+  if (isGlobalDashboard) {
+    return (
+      <div id="dashboard-report" ref={reportRef} className="space-y-8 pb-20 animate-in fade-in duration-700">
+
+        {/* ═══ PREMIUM GLOBAL HEADER ═══ */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-900 p-8 rounded-[2.5rem] border border-indigo-500/20 shadow-2xl shadow-indigo-500/10 no-print relative overflow-hidden text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(99,102,241,0.15),transparent_50%)]" />
+          <div className="relative">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.25em]"><BiInline en="Unified Competitive Portal" /></span>
+            </div>
+            <Bi en="Cross-Brand Intelligence Dashboard" as="h1" className="text-3xl font-black tracking-tight text-white" />
+            <p className="text-slate-400 font-bold text-xs mt-1.5 uppercase tracking-wider">
+              {targetBrand ? (
+                <>
+                  <BiInline en="Comparing Your Brand" /> ({targetBrand}) <BiInline en="against" /> {competitorBrands.length} <BiInline en="competitors globally" />
+                </>
+              ) : (
+                <BiInline en="Competitor Analysis" />
+              )}
+            </p>
+          </div>
+
+          <div className="relative flex flex-wrap items-center gap-3">
+            {allJobs.length > 1 && (
+              <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-2.5 rounded-2xl">
+                <span className="text-[10px] font-black uppercase text-indigo-300 tracking-wider whitespace-nowrap"><BiInline en="Analyze Single Run:" /></span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    if (!selectedId) return;
+                    router.push(`/jobs/${selectedId}`);
+                  }}
+                  className="bg-transparent text-xs font-black text-white focus:outline-none cursor-pointer"
+                >
+                  <option value="" disabled className="text-slate-800">Select specific job...</option>
+                  {allJobs.map((j: any) => {
+                    const dateStr = new Date(j.finished_at).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric'
+                    });
+                    return (
+                      <option key={j.id} value={j.id} className="font-bold text-slate-800">
+                        {j.target_name} vs {Array.isArray(j.competitors) ? j.competitors.join(', ') : ''} ({dateStr})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+            
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-xs font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all duration-300 hover:scale-105"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <BiInline en="Export Global Report" />
+            </button>
+          </div>
+        </div>
+
+        {/* ═══ GLOBAL EXECUTIVE OVERVIEW GRID (KPI CARDS) ═══ */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPI
+            label={`${targetBrand || 'Target'} ${t('Rating')}`}
+            labelColor={targetSummary?.color || PALETTE[0]}
+            value={`${(targetSummary?.avgRating ?? 0).toFixed(2)} ★`}
+            sub={`${t('Rating')} · ${t('Your Brand')}`}
+            color="indigo"
+            badge={`${t('YOUR BRAND')}`}
+          />
+          <KPI
+            label={`${t('Your Brand Locations')}`}
+            value={`${targetSummary?.branches ?? 0} ${t('Branches')}`}
+            sub={`${t('Total physical branches analyzed')}`}
+            color="indigo"
+          />
+          <KPI
+            label={`${t('Competitor Locations')}`}
+            value={`${compSummaries.reduce((sum, c) => sum + c.branches, 0)} ${t('Branches')}`}
+            sub={`${competitorBrands.length} ${t('Competitor')}`}
+            color="amber"
+          />
+          <KPI
+            label={`${t('Rating Position')}`}
+            value={isAhead ? t('Ahead') : t('Behind')}
+            sub={`Gap: ${isAhead ? '+' : ''}${ratingGap.toFixed(2)} vs competitors avg (${compAvgRating.toFixed(2)} ★)`}
+            color={isAhead ? 'emerald' : 'rose'}
+          />
+        </div>
+
+        {/* Rating Source & Type Explanatory Callout Banner */}
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-5 rounded-[2rem] border border-indigo-100/50 flex items-start gap-4 shadow-sm animate-in fade-in duration-500">
+          <div className="w-10 h-10 bg-indigo-500 text-white rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md shadow-indigo-500/20">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <div className="space-y-1">
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <BiInline en="Overall Rating System Clarification" />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+            </h4>
+            <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
+              <BiInline 
+                en="Overall average ratings display lifetime ratings pulled directly from Google Maps up to today. Period comparison data breakdown below represents datewise changes over the specific job period duration." 
+              />
+            </p>
+          </div>
+        </div>
+
+        {/* ═══ STANDINGS LEADERBOARD & FOOTPRINT COMPARISON ═══ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* Brand Standings Leaderboard */}
+          <Card>
+            <SectionHeader title={`${t('Unified Brand Standings')}`} sub={`${t('All analyzed brands ranked by overall average rating')}`} />
+            <div className="mt-6 space-y-4">
+              {brandSummaries.map((b, idx) => {
+                const isTarget = b.isTarget;
+                const rank = idx + 1;
+                return (
+                  <div 
+                    key={b.brand} 
+                    className={`flex items-center justify-between p-5 rounded-2xl border transition-all duration-300 hover:scale-[1.01] ${
+                      isTarget 
+                        ? 'bg-gradient-to-r from-indigo-50/50 to-indigo-100/10 border-indigo-200/60 shadow-md shadow-indigo-100/20' 
+                        : 'bg-white border-slate-100 shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      {/* Rank Indicator */}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shadow-sm ${
+                        rank === 1 ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                        rank === 2 ? 'bg-slate-100 text-slate-700 border border-slate-200' :
+                        'bg-slate-50 text-slate-400 border border-slate-100'
+                      }`}>
+                        {rank}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-slate-800 text-sm">{b.brand}</span>
+                          {isTarget && (
+                            <span className="text-[8px] font-black uppercase bg-indigo-600 text-white px-2 py-0.5 rounded-full tracking-widest shadow-sm">
+                              YOUR BRAND | علامتك التجارية
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-bold text-slate-400 mt-0.5">
+                          {b.branches} {t('Branches')} · {b.totalReviews.toLocaleString()} {t('Reviews')}
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-600/80 bg-indigo-50/60 px-2 py-0.5 rounded-md mt-1 w-fit border border-indigo-100/20">
+                          <svg className="w-2.5 h-2.5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          <span>{formatDateRange(b.dateStart, b.dateEnd)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-base font-black text-slate-800 flex items-center justify-end gap-1">
+                        <span>{(b.avgRating ?? 0).toFixed(2)}</span>
+                        <span className="text-amber-400 text-xs">★</span>
+                      </div>
+                      <div className="w-24 h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden relative">
+                        <div 
+                          className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full animate-all" 
+                          style={{ 
+                            width: `${((b.avgRating ?? 0) / 5) * 100}%`,
+                            backgroundColor: b.color 
+                          }} 
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Physical Branch Footprint Comparison */}
+          <Card>
+            <SectionHeader title={`${t('Physical Presence Breakdown')}`} sub={`${t('Number of physical locations analyzed per brand')}`} />
+            <div className="mt-6 space-y-6">
+              {brandSummaries.map(b => {
+                const maxBranches = Math.max(...brandSummaries.map(x => x.branches), 1);
+                const pct = (b.branches / maxBranches) * 100;
+                return (
+                  <div key={b.brand} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: b.color }} />
+                        <span className="text-xs font-black text-slate-700">{b.brand}</span>
+                      </div>
+                      <span className="text-xs font-black text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        {b.branches} {b.branches === 1 ? t('branch') : t('branches')}
+                      </span>
+                    </div>
+                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden relative">
+                      <div 
+                        className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full transition-all duration-1000" 
+                        style={{ 
+                          width: `${pct}%`,
+                          backgroundColor: b.color,
+                          boxShadow: `0 0 12px ${b.color}40`
+                        }} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+        </div>
+
+        {/* ═══ SENTIMENT DENSITY COMPASS (SIDE-BY-SIDE COMPOUND SENTIMENT BARS) ═══ */}
+        <Card>
+          <SectionHeader title={`${t('Comparative Sentiment Spectrum')}`} sub={`${t('Review rating breakdown (Positive vs Neutral vs Negative) side-by-side')}`} />
+          <div className="mt-8 space-y-6">
+            {brandSummaries.map(b => {
+              const stars = b.stars || [0, 0, 0, 0, 0];
+              const positive = stars[0] + stars[1]; // 5★ + 4★
+              const neutral = stars[2];            // 3★
+              const negative = stars[3] + stars[4]; // 2★ + 1★
+              const total = Math.max(1, positive + neutral + negative);
+
+              const posPct = (positive / total) * 100;
+              const neuPct = (neutral / total) * 100;
+              const negPct = (negative / total) * 100;
+
+              return (
+                <div key={b.brand} className="space-y-3 bg-slate-50/50 p-5 rounded-2xl border border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BrandBadge brand={b.brand} color={b.color} />
+                      {b.isTarget && (
+                        <span className="text-[7px] font-black uppercase bg-indigo-600 text-white px-2 py-0.5 rounded-full tracking-widest">
+                          YOUR BRAND
+                        </span>
+                      )}
+                      <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md flex items-center gap-1 border border-slate-200/55">
+                        <svg className="w-2.5 h-2.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        {formatDateRange(b.dateStart, b.dateEnd)}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      {total.toLocaleString()} {t('total reviews')}
+                    </span>
+                  </div>
+
+                  <div className="h-5 rounded-xl overflow-hidden flex relative shadow-sm">
+                    {positive > 0 && (
+                      <div 
+                        className="h-full bg-emerald-500 flex items-center justify-center text-[9px] font-black text-white" 
+                        style={{ width: `${posPct}%` }}
+                        title={`Positive: ${positive} reviews (${posPct.toFixed(1)}%)`}
+                      >
+                        {posPct > 10 && `${posPct.toFixed(0)}%`}
+                      </div>
+                    )}
+                    {neutral > 0 && (
+                      <div 
+                        className="h-full bg-slate-400 flex items-center justify-center text-[9px] font-black text-white" 
+                        style={{ width: `${neuPct}%` }}
+                        title={`Neutral: ${neutral} reviews (${neuPct.toFixed(1)}%)`}
+                      >
+                        {neuPct > 10 && `${neuPct.toFixed(0)}%`}
+                      </div>
+                    )}
+                    {negative > 0 && (
+                      <div 
+                        className="h-full bg-rose-500 flex items-center justify-center text-[9px] font-black text-white" 
+                        style={{ width: `${negPct}%` }}
+                        title={`Negative: ${negative} reviews (${negPct.toFixed(1)}%)`}
+                      >
+                        {negPct > 10 && `${negPct.toFixed(0)}%`}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap justify-between items-center text-[10px] font-black text-slate-500 uppercase tracking-wider pt-1 gap-2">
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-md bg-emerald-500 inline-block" /> {t('Positive (4-5★):')} {positive.toLocaleString()}</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-md bg-slate-400 inline-block" /> {t('Neutral (3★):')} {neutral.toLocaleString()}</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-md bg-rose-500 inline-block" /> {t('Negative (1-2★):')} {negative.toLocaleString()}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* ═══ CITY-WISE COMPARATIVE GRID ═══ */}
+        <Card>
+          <SectionHeader title={`${t('City-Wise Brand Performance Matrix')}`} sub={`${t('Comparing brand footprint and satisfaction scores side-by-side across all analyzed cities')}`} />
+          <div className="mt-6 overflow-x-auto border border-slate-100 rounded-2xl shadow-sm bg-white">
+            <table className="w-full text-start border-collapse min-w-[600px]">
+              <thead>
+                <tr className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                  <th className="p-5"><BiInline en="City Name" /></th>
+                  {brandSummaries.map(b => (
+                    <th key={b.brand} className="p-5 text-center" style={{ color: b.color }}>
+                      {b.brand} {t('Presence')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {cityBreakdown.map(item => {
+                  return (
+                    <tr key={item.city} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-5 font-black text-slate-800">{item.city}</td>
+                      {brandSummaries.map(b => {
+                        const brandCityData = item.brands.find(bc => bc.brand === b.brand);
+                        return (
+                          <td key={b.brand} className="p-5 text-center">
+                            {brandCityData ? (
+                              <div className="inline-flex flex-col items-center justify-center p-2 rounded-xl bg-slate-50 border border-slate-100 min-w-[100px]">
+                                <div className="text-sm font-black text-slate-700">{brandCityData.branches} {t('Branches')}</div>
+                                <div className="text-[10px] font-black text-amber-500 flex items-center gap-0.5 mt-0.5">
+                                  <span>{(brandCityData.avgRating ?? 0).toFixed(2)}</span>
+                                  <span>★</span>
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                                  {brandCityData.reviews.toLocaleString()} {t('reviews')}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
+                                <BiInline en="No Presence" />
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+      </div>
+    );
+  }
+
+  return (
+    <div id="dashboard-report" ref={reportRef} className="space-y-8 pb-20 animate-in fade-in duration-700">
+
+      {/* ═══ PREMIUM HEADER WITH JOB SWITCHER ═══ */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm no-print">
+        <div>
+          <Bi en="Executive Analysis Dashboard" as="h1" className="text-2xl font-black text-slate-900 tracking-tight" />
+          <p className="text-slate-500 font-bold text-xs mt-1 uppercase tracking-wider">
+            {targetBrand ? `${targetBrand} vs ${competitorBrands.join(', ')}` : t('Competitor Analysis')}
+          </p>
+        </div>
+
+        {allJobs.length > 1 && (
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-2xl max-w-sm w-full sm:w-auto">
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider whitespace-nowrap"><BiInline en="Active Run:" /></span>
+            <select
+              value={jobId || ''}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                if (!selectedId) return;
+                const isLatest = allJobs[0]?.id === selectedId;
+                if (isLatest) {
+                  router.push('/dashboard');
+                } else {
+                  router.push(`/jobs/${selectedId}`);
+                }
+              }}
+              className="bg-transparent text-xs font-black text-slate-700 focus:outline-none cursor-pointer w-full"
+            >
+              {allJobs.map((j: any) => {
+                const dateStr = new Date(j.finished_at).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                });
+                const isCurrent = j.id === jobId;
+                return (
+                  <option key={j.id} value={j.id} className="font-bold text-slate-800">
+                    {j.target_name} ({dateStr}) {isCurrent ? '👈 Active' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        )}
       </div>
 
+      {/* ═══ TAB NAVIGATION ═══ */}
+      {!isGlobalDashboard && (
+        <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl">
+          {([
+            { key: 'overview' as Tab, label: t('Overview') },
+            { key: 'branches' as Tab, label: t('Branch Data') },
+            { key: 'rankings' as Tab, label: t('Rankings') },
+            { key: 'popular-times' as Tab, label: t('Popular Times') },
+          ]).map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeTab === tab.key
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Export / Email Actions */}
+      <div className="flex justify-end items-center gap-3 no-print">
+        {jobId && !isGlobalDashboard && (
+          <button
+            onClick={() => setIsEmailModalOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-700 hover:text-slate-900 text-xs font-black uppercase tracking-wider rounded-xl shadow-sm hover:shadow-md transition-all duration-300 hover:scale-105"
+          >
+            <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <BiInline en="Email Report | إرسال التقرير بالبريد" />
+          </button>
+        )}
+        <button
+          onClick={handleExportPDF}
+          className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all duration-300 hover:scale-105"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <BiInline en="Export Report as PDF" />
+        </button>
+      </div>
       {/* ═══════════════════════════════════════════════════════
           TAB: OVERVIEW
          ═══════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
         <>
+          {/* ── Data Period Banner ── */}
+          <div className="relative overflow-hidden p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/20 shadow-2xl shadow-indigo-500/10">
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(99,102,241,0.15),transparent_50%)]" />
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.25em]"><BiInline en="Analysis Data Period" /></span>
+                </div>
+                <div className="text-xl font-black text-white tracking-tight">{periodInfo.label}</div>
+                <div className="text-xs font-bold text-slate-400 mt-1">{periodInfo.totalDays} {t('days of review data analyzed')}</div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { label: t('Newest'), info: periodInfo.p1.label, color: 'emerald' },
+                  { label: t('Middle'), info: periodInfo.p2.label, color: 'amber' },
+                  { label: t('Oldest'), info: periodInfo.p3.label, color: 'slate' },
+                ].map(p => (
+                  <div key={p.label} className={`px-4 py-2 rounded-xl border ${p.color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/20' :
+                    p.color === 'amber' ? 'bg-amber-500/10 border-amber-500/20' :
+                      'bg-slate-500/10 border-slate-500/20'
+                    }`}>
+                    <div className={`text-[8px] font-black uppercase tracking-widest ${p.color === 'emerald' ? 'text-emerald-400' :
+                      p.color === 'amber' ? 'text-amber-400' :
+                        'text-slate-400'
+                      }`}>{p.label}</div>
+                    <div className="text-[11px] font-bold text-white mt-0.5">{p.info}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* KPI Summary Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <KPI
               label={targetBrand || 'Target'}
               labelColor={targetSummary?.color || PALETTE[0]}
               value={`${(targetSummary?.avgRating ?? 0).toFixed(2)} ★`}
-              sub={`${targetSummary?.totalReviews ?? 0} reviews`}
+              sub={`Overall avg of all ${targetSummary?.branches ?? 0} branches · ${targetSummary?.totalReviews ?? 0} reviews`}
               color="indigo"
-              badge={targetBrand ? 'TARGET' : undefined}
+              badge={targetBrand ? 'YOUR BRAND' : undefined}
             />
             <KPI
-              label="Competitors Avg"
+              label={`${t('Competitors Avg')}`}
               value={`${compAvgRating.toFixed(2)} ★`}
-              sub={`${compSummaries.reduce((s, c) => s + c.totalReviews, 0).toLocaleString()} reviews`}
+              sub={`Avg of all competitor branches · ${compSummaries.reduce((s, c) => s + c.totalReviews, 0).toLocaleString()} reviews`}
               color="slate"
             />
             <KPI
-              label="Rating Gap"
+              label={`${t('Rating Gap')}`}
               value={`${isAhead ? '+' : ''}${ratingGap.toFixed(2)}`}
-              sub={isAhead ? 'Target is ahead' : 'Target is behind'}
+              sub={isAhead ? t('Your brand is ahead of competitors') : t('Your brand is behind competitors')}
               color={isAhead ? 'emerald' : 'rose'}
             />
             <KPI
-              label="Target Branches"
+              label={`${t('Your Branches')}`}
               value={`${targetSummary?.branches ?? 0}`}
-              sub="Our total footprint"
+              sub={`${t('Total locations you have')}`}
               color="amber"
             />
             <KPI
-              label="Comp. Branches"
+              label={`${t('Comp. Branches')}`}
               value={`${compSummaries.reduce((s, c) => s + c.branches, 0)}`}
-              sub="Competitor footprint"
+              sub={`${t('Competitor footprint')}`}
               color="slate"
             />
           </div>
 
           {/* Overall Reputation */}
           <Card>
-            <SectionHeader title="Overall Reputation" sub="Your brand position vs each competitor" />
+            <SectionHeader title={`${t('Overall Reputation')}`} sub={`${periodInfo.label}`} />
             <div className="mt-6">
               <div className="flex items-center gap-4 mb-6 p-5 rounded-2xl border-2 border-dashed" style={{
                 borderColor: isAhead ? '#10B981' : '#F43F5E',
@@ -398,11 +1067,11 @@ export default function DashboardView({ data }: DashboardProps) {
                 </div>
                 <div>
                   <div className="text-lg font-black text-slate-900">
-                    <span style={{ color: targetSummary?.color || PALETTE[0] }}>{targetBrand || 'Target'}</span> is {isAhead ? 'AHEAD' : 'BEHIND'} by {Math.abs(ratingGap).toFixed(2)} stars
+                    <span style={{ color: targetSummary?.color || PALETTE[0] }}>{targetBrand || t('Target')}</span> {isAhead ? t('is AHEAD by') : t('is BEHIND by')} {Math.abs(ratingGap).toFixed(2)} {t('stars')}
                   </div>
                   <div className="text-sm text-slate-500 font-medium">
-                    {(targetSummary?.avgRating ?? 0).toFixed(2)} ★ vs {compAvgRating.toFixed(2)} ★ competitors average
-                    {targetSummary && ` · ${targetSummary.branches} branches · ${targetSummary.totalReviews.toLocaleString()} total reviews`}
+                    {(targetSummary?.avgRating ?? 0).toFixed(2)} ★ {t('vs')} {compAvgRating.toFixed(2)} ★ {t('competitors average')}
+                    {targetSummary && ` · ${targetSummary.branches} ${t('branches')} · ${targetSummary.totalReviews.toLocaleString()} ${t('reviews')}`}
                   </div>
                 </div>
               </div>
@@ -423,13 +1092,13 @@ export default function DashboardView({ data }: DashboardProps) {
                       <div className="flex-1">
                         <div className="flex items-center gap-3">
                           <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden relative">
-                            <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(tRating / 5) * 100}%`, backgroundColor: targetSummary?.color || PALETTE[0] }} />
+                            <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full" style={{ width: `${(tRating / 5) * 100}%`, backgroundColor: targetSummary?.color || PALETTE[0] }} />
                           </div>
-                          <span className="text-xs font-black text-slate-700 w-10 text-right">{tRating.toFixed(2)}</span>
+                          <span className="text-xs font-black text-slate-700 w-10 text-end">{tRating.toFixed(2)}</span>
                           <span className="text-[10px] text-slate-400">vs</span>
                           <span className="text-xs font-black text-slate-700 w-10">{cRating.toFixed(2)}</span>
                           <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden relative">
-                            <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(cRating / 5) * 100}%`, backgroundColor: comp.color }} />
+                            <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full" style={{ width: `${(cRating / 5) * 100}%`, backgroundColor: comp.color }} />
                           </div>
                         </div>
                       </div>
@@ -443,51 +1112,15 @@ export default function DashboardView({ data }: DashboardProps) {
             </div>
           </Card>
 
-          {/* Brand Comparison Table */}
-          <Card>
-            <SectionHeader title="Brand Comparison" sub="Aggregated performance per brand — current period" />
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Brand</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Avg Rating (Current Period)</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total Reviews (Current Period)</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total Branches</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Overall Avg Rating</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Overall Reviews</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {brandSummaries.map(b => (
-                    <tr key={b.brand} className="hover:bg-slate-50/50">
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
-                          <BrandBadge brand={b.brand} color={b.color} />
-                          {b.isTarget && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase">Target</span>}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentPeriodAvg?.toFixed(2) ?? '—'} ★</td>
-                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.currentPeriodReviews.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-right font-black text-slate-900">{b.branches}</td>
-                      <td className="px-3 py-3 text-right font-bold text-slate-600">{b.avgRating?.toFixed(2) ?? '—'} ★</td>
-                      <td className="px-3 py-3 text-right font-bold text-slate-600">{b.totalReviews.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
           {/* Star Distribution — Premium Donut Portfolio */}
           <Card>
-            <SectionHeader title="Brand Sentiment Analysis" sub="5★ to 1★ distribution across all brands" />
-            
+            <SectionHeader title={`${t('Brand Sentiment Analysis')}`} sub={`${periodInfo.label}`} />
+
             <div className="mt-8 grid grid-cols-1 xl:grid-cols-2 gap-6">
               {brandSummaries.map(b => {
                 const isTarget = b.isTarget;
                 const total = b.totalReviews || 1;
-                
+
                 return (
                   <div key={b.brand} className={`p-6 rounded-[2rem] border transition-all ${isTarget ? 'bg-slate-900 border-slate-800 shadow-2xl' : 'bg-white border-slate-100 shadow-sm'}`}>
                     <div className="flex items-center justify-between mb-6">
@@ -495,7 +1128,7 @@ export default function DashboardView({ data }: DashboardProps) {
                         <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: b.color }} />
                         <h4 className={`text-lg font-black tracking-tight ${isTarget ? 'text-white' : 'text-slate-900'}`}>{b.brand}</h4>
                       </div>
-                      {isTarget && <span className="text-[8px] font-black px-2 py-1 bg-indigo-600 text-white rounded-lg uppercase">Target</span>}
+                      {isTarget && <span className="text-[8px] font-black px-2 py-1 bg-indigo-600 text-white rounded-lg uppercase"><BiInline en="Your Brand" /></span>}
                     </div>
 
                     <div className="flex flex-col sm:flex-row items-center gap-8">
@@ -503,7 +1136,7 @@ export default function DashboardView({ data }: DashboardProps) {
                       <div className="relative shrink-0">
                         <DonutChart stars={b.stars} color={b.color} size={160} />
                         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                          <div className={`text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1`}>Rating</div>
+                          <div className={`text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1`}>{t('Rating')}</div>
                           <div className={`text-3xl font-black leading-none ${isTarget ? 'text-white' : 'text-slate-900'}`}>
                             {b.avgRating?.toFixed(2) || '—'}
                           </div>
@@ -517,15 +1150,15 @@ export default function DashboardView({ data }: DashboardProps) {
                           const count = b.stars[idx];
                           const pct = (count / total) * 100;
                           const color = star >= 4 ? '#10B981' : star === 3 ? '#FBBF24' : '#F43F5E';
-                          
+
                           return (
                             <div key={star} className="flex items-center gap-3">
                               <div className="flex items-center gap-1 w-8">
                                 <span className={`text-[10px] font-black ${isTarget ? 'text-slate-400' : 'text-slate-500'}`}>{star}</span>
                                 <Star className="w-2.5 h-2.5 fill-current opacity-40" style={{ color }} />
                               </div>
-                              <div className={`flex-1 h-1.5 rounded-full ${isTarget ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                                <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color, boxShadow: isTarget ? `0 0 8px ${color}40` : 'none' }} />
+                              <div className={`flex-1 h-1.5 rounded-full relative overflow-hidden ${isTarget ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                                <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color, boxShadow: isTarget ? `0 0 8px ${color}40` : 'none' }} />
                               </div>
                               <div className="flex items-center gap-2 min-w-[70px] justify-end">
                                 <span className={`text-[10px] font-black ${isTarget ? 'text-white' : 'text-slate-900'}`}>{pct.toFixed(1)}%</span>
@@ -542,10 +1175,128 @@ export default function DashboardView({ data }: DashboardProps) {
             </div>
           </Card>
 
+          {/* ── NEW: Rating Comparison + Review Share ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <SectionHeader title={`${t('Rating Comparison')}`} sub={`${periodInfo.label}`} />
+              <div className="mt-6 space-y-3">
+                {brandSummaries.map((b, idx) => {
+                  const rating = b.avgRating ?? 0;
+                  const pct = (rating / 5) * 100;
+                  return (
+                    <div key={b.brand} className="flex items-center gap-3 animate-fade-slide-up" style={{ animationDelay: `${idx * 100}ms` }}>
+                      <div className="min-w-[100px] text-end">
+                        <span className="text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>{b.brand}</span>
+                      </div>
+                      <div className="flex-1 h-8 bg-slate-100 rounded-xl overflow-hidden relative">
+                        <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-xl animate-grow-width flex items-center justify-end pe-3"
+                          style={{ width: `${pct}%`, backgroundColor: b.color, boxShadow: `0 4px 14px ${b.color}30`, animationDelay: `${idx * 100 + 200}ms` }}>
+                          <span className="text-[11px] font-black text-white drop-shadow">{rating.toFixed(2)} ★</span>
+                        </div>
+                      </div>
+                      <div className="min-w-[60px] text-end">
+                        <span className="text-[10px] font-bold text-slate-500">{b.totalReviews.toLocaleString()} {t('reviews')}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card>
+              <SectionHeader title={`${t('Review Volume Share')}`} sub={`${periodInfo.label}`} />
+              <div className="mt-6">
+                {(() => {
+                  const totalAll = brandSummaries.reduce((s, b) => s + b.totalReviews, 0) || 1;
+                  return (
+                    <>
+                      <div className="h-6 flex rounded-xl overflow-hidden border border-slate-100 mb-4">
+                        {brandSummaries.map(b => {
+                          const pct = (b.totalReviews / totalAll) * 100;
+                          if (pct < 0.5) return null;
+                          return (
+                            <div key={b.brand} className="h-full transition-all duration-700 cursor-default relative group"
+                              style={{ width: `${pct}%`, backgroundColor: b.color }}
+                              title={`${b.brand}: ${b.totalReviews.toLocaleString()} reviews (${pct.toFixed(1)}%)`}>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="space-y-2">
+                        {brandSummaries.map(b => {
+                          const pct = (b.totalReviews / totalAll) * 100;
+                          return (
+                            <div key={b.brand} className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                                <span className="text-xs font-black text-slate-700">{b.brand}</span>
+                                {b.isTarget ? (
+                                  <span className="text-[7px] font-black px-1 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase"><BiInline en="Your Brand" /></span>
+                                ) : (
+                                  <span className="text-[7px] font-black px-1 py-0.5 bg-slate-100 text-slate-400 rounded uppercase"><BiInline en="Competitor" /></span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-black text-slate-900">{b.totalReviews.toLocaleString()}</span>
+                                <span className="text-[10px] font-bold text-slate-400 min-w-[40px] text-right">{pct.toFixed(1)}%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </Card>
+          </div>
+
+          {/* ── NEW: Star Distribution Stacked Comparison ── */}
+          <Card>
+            <SectionHeader title={`${t('Star Distribution Comparison')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-6 overflow-x-auto">
+              <div className="flex items-end gap-6 min-w-[400px]" style={{ minHeight: 220 }}>
+                {brandSummaries.map((b, bIdx) => {
+                  const total = b.totalReviews || 1;
+                  const STAR_COLORS = ['#10B981', '#34D399', '#FBBF24', '#FB7185', '#F43F5E'];
+                  return (
+                    <div key={b.brand} className="flex-1 flex flex-col items-center gap-2 animate-scale-in" style={{ animationDelay: `${bIdx * 150}ms` }}>
+                      <div className="w-full flex flex-col rounded-xl overflow-hidden border border-slate-100" style={{ height: 180 }}>
+                        {b.stars.map((count, i) => {
+                          const pct = (count / total) * 100;
+                          if (pct < 0.5) return null;
+                          return (
+                            <div key={i} className="w-full transition-all duration-700 flex items-center justify-center cursor-default"
+                              style={{ height: `${pct}%`, backgroundColor: STAR_COLORS[i] }}
+                              title={`${5 - i}★: ${count} (${pct.toFixed(1)}%)`}>
+                              {pct > 8 && <span className="text-[9px] font-black text-white drop-shadow">{pct.toFixed(0)}%</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] font-black uppercase tracking-tight" style={{ color: b.color }}>{b.brand}</div>
+                        <div className="text-[9px] font-bold text-slate-400">{b.avgRating?.toFixed(2) ?? '—'} ★</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-center gap-4 mt-4 pt-3 border-t border-slate-100">
+                {[{ l: '5★', c: '#10B981' }, { l: '4★', c: '#34D399' }, { l: '3★', c: '#FBBF24' }, { l: '2★', c: '#FB7185' }, { l: '1★', c: '#F43F5E' }].map(s => (
+                  <div key={s.l} className="flex items-center gap-1">
+                    <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.c }} />
+                    <span className="text-[9px] font-bold text-slate-500">{s.l}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
           {/* Monthly Trend — Line Chart (Rating) + Bar Chart (Volume) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
-              <SectionHeader title="Rating Trend" sub="Average rating across 3 sub-periods per brand" />
+              <SectionHeader title={`${t('Rating Trend')}`} sub={`${periodInfo.label}`} />
               <div className="mt-4">
                 <MultiLineChart
                   series={brandSummaries.map(b => ({
@@ -553,7 +1304,7 @@ export default function DashboardView({ data }: DashboardProps) {
                     data: [...b.monthly].reverse().map(m => m.avg),
                     color: b.color,
                   }))}
-                  labels={['Period 3 (Oldest)', 'Period 2', 'Period 1 (Newest)']}
+                  labels={[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short]}
                   yMin={Math.max(0, Math.min(...brandSummaries.flatMap(b => b.monthly.map(m => m.avg)).filter(Boolean) as number[]) - 0.5)}
                   yMax={5}
                   yLabel="Avg Rating"
@@ -570,10 +1321,10 @@ export default function DashboardView({ data }: DashboardProps) {
             </Card>
 
             <Card>
-              <SectionHeader title="Review Volume" sub="Number of reviews per sub-period" />
+              <SectionHeader title={`${t('Review Volume')}`} sub={`${periodInfo.label}`} />
               <div className="mt-4">
                 <GroupedBarChart
-                  groups={['Period 3 (Oldest)', 'Period 2', 'Period 1 (Newest)']}
+                  groups={[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short]}
                   series={brandSummaries.map(b => ({
                     label: b.brand,
                     data: [...b.monthly].reverse().map(m => m.reviews),
@@ -595,97 +1346,167 @@ export default function DashboardView({ data }: DashboardProps) {
 
           {/* Branch Rating Distribution — Scatter-like horizontal chart */}
           <Card>
-            <SectionHeader title="Branch Rating Overview" sub="Every branch plotted by average rating — quickly spot outliers" />
+            <SectionHeader title={`${t('Branch Rating Overview')}`} sub={`${periodInfo.label}`} />
             <div className="mt-6">
-            <div className="mt-8 space-y-10">
-              {brandSummaries.map(bs => {
-                const brandBranches = analytics
-                  .filter(a => a.brand === bs.brand && a.avg_rating_period != null && a.total_reviews_period > 0)
-                  .sort((a, b) => (b.avg_rating_period ?? 0) - (a.avg_rating_period ?? 0));
-                
-                if (brandBranches.length === 0) return null;
+              <div className="mt-8 space-y-10">
+                {brandSummaries.map(bs => {
+                  const brandBranches = analytics
+                    .filter(a => a.brand === bs.brand && getBranchRating(a) > 0)
+                    .sort((a, b) => getBranchRating(b) - getBranchRating(a));
 
-                // Stats for health bar
-                const green = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 4.0).length;
-                const amber = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 3.0 && (a.avg_rating_period ?? 0) < 4.0).length;
-                const red = brandBranches.length - green - amber;
+                  if (brandBranches.length === 0) return null;
 
-                // Stats for health bar
-                const greenCount = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 4.0).length;
-                const amberCount = brandBranches.filter(a => (a.avg_rating_period ?? 0) >= 3.0 && (a.avg_rating_period ?? 0) < 4.0).length;
-                const redCount = brandBranches.length - greenCount - amberCount;
-                
-                const greenPct = Math.round((greenCount / brandBranches.length) * 100);
-                const amberPct = Math.round((amberCount / brandBranches.length) * 100);
-                const redPct = 100 - greenPct - amberPct;
+                  // Stats for health bar
+                  const green = brandBranches.filter(a => getBranchRating(a) >= 4.0).length;
+                  const amber = brandBranches.filter(a => getBranchRating(a) >= 3.0 && getBranchRating(a) < 4.0).length;
+                  const red = brandBranches.length - green - amber;
 
-                return (
-                  <div key={bs.brand} className="relative group bg-white/50 backdrop-blur-sm p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-md transition-all duration-500">
-                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
-                      {/* Brand Ident & Status */}
-                      <div className="flex items-center gap-4 min-w-[200px]">
-                        <div className="w-1.5 h-10 rounded-full" style={{ backgroundColor: bs.color }} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-black text-slate-900 tracking-tight uppercase leading-none">{bs.brand}</h4>
-                            {bs.isTarget && <span className="text-[7px] font-black bg-indigo-600 text-white px-1.5 py-0.5 rounded-md uppercase tracking-widest">Target</span>}
+                  // Stats for health bar
+                  const greenCount = brandBranches.filter(a => getBranchRating(a) >= 4.0).length;
+                  const amberCount = brandBranches.filter(a => getBranchRating(a) >= 3.0 && getBranchRating(a) < 4.0).length;
+                  const redCount = brandBranches.length - greenCount - amberCount;
+
+                  const greenPct = Math.round((greenCount / brandBranches.length) * 100);
+                  const amberPct = Math.round((amberCount / brandBranches.length) * 100);
+                  const redPct = 100 - greenPct - amberPct;
+
+                  return (
+                    <div key={bs.brand} className="relative group bg-white/50 backdrop-blur-sm p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-md transition-all duration-500">
+                      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
+                        {/* Brand Ident & Status */}
+                        <div className="flex items-center gap-4 min-w-[200px]">
+                          <div className="w-1.5 h-10 rounded-full" style={{ backgroundColor: bs.color }} />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-black text-slate-900 tracking-tight uppercase leading-none">{bs.brand}</h4>
+                              {bs.isTarget && <span className="text-[7px] font-black bg-indigo-600 text-white px-1.5 py-0.5 rounded-md uppercase tracking-widest"><BiInline en="Your Brand" /></span>}
+                            </div>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{brandBranches.length} {t('Branches')}</span>
+                              <span className="w-1 h-1 rounded-full bg-slate-300" />
+                              <span className={`text-[9px] font-black uppercase tracking-tighter ${greenPct >= 70 ? 'text-emerald-500' : redPct > 20 ? 'text-rose-500' : 'text-amber-500'
+                                }`}>
+                                {greenPct >= 70 ? t('Market Leader') : redPct > 20 ? t('Action Required') : t('Maintaining')}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{brandBranches.length} Branches</span>
-                            <span className="w-1 h-1 rounded-full bg-slate-300" />
-                            <span className={`text-[9px] font-black uppercase tracking-tighter ${
-                              greenPct >= 70 ? 'text-emerald-500' : redPct > 20 ? 'text-rose-500' : 'text-amber-500'
-                            }`}>
-                              {greenPct >= 70 ? 'Market Leader' : redPct > 20 ? 'Action Required' : 'Maintaining'}
-                            </span>
+                        </div>
+
+                        {/* Premium Health Bar */}
+                        <div className="flex-1 max-w-md">
+                          <div className="flex justify-between items-center mb-2 px-1">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Portfolio Quality Distribution" /></span>
+                            <div className="flex gap-3 text-[10px] font-black">
+                              <div className="flex items-center gap-1.5 text-emerald-600">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                {greenPct}%
+                              </div>
+                              <div className="flex items-center gap-1.5 text-rose-500">
+                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                {redPct}%
+                              </div>
+                            </div>
+                          </div>
+                          <div className="h-2.5 rounded-full bg-slate-100 p-0.5 flex gap-0.5">
+                            <div style={{ width: `${greenPct}%` }} className="h-full bg-emerald-500 rounded-s-full shadow-[0_0_10px_rgba(16,185,129,0.2)]" />
+                            <div style={{ width: `${amberPct}%` }} className="h-full bg-amber-400" />
+                            <div style={{ width: `${redPct}%` }} className="h-full bg-rose-500 rounded-e-full shadow-[0_0_10px_rgba(244,63,94,0.2)]" />
                           </div>
                         </div>
                       </div>
 
-                      {/* Premium Health Bar */}
-                      <div className="flex-1 max-w-md">
-                        <div className="flex justify-between items-center mb-2 px-1">
-                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Portfolio Quality Distribution</span>
-                          <div className="flex gap-3 text-[10px] font-black">
-                            <div className="flex items-center gap-1.5 text-emerald-600">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              {greenPct}%
+                      <div className="flex flex-wrap gap-2 p-6 bg-slate-50/30 rounded-[2.5rem] border border-slate-100/50">
+                        {brandBranches.map(a => {
+                          const r = getBranchRating(a);
+                          let bgColor = '#10B981'; let textColor = 'white';
+                          if (r < 4.5) { bgColor = '#34D399'; textColor = 'white'; }
+                          if (r < 4.0) { bgColor = '#FBBF24'; textColor = '#1E293B'; }
+                          if (r < 3.5) { bgColor = '#FB923C'; textColor = 'white'; }
+                          if (r < 3.0) { bgColor = '#F43F5E'; textColor = 'white'; }
+                          const displayName = getBranchDisplayName(a);
+                          const shortName = displayName.length > 18 ? displayName.slice(0, 18) + '…' : displayName;
+
+                          return (
+                            <div key={a.id}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full cursor-default transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-lg border border-white/30"
+                              style={{ backgroundColor: bgColor, color: textColor }}
+                              title={`${displayName}\n${r.toFixed(2)} ★ · ${a.total_reviews_period} reviews`}>
+                              <span className="text-[10px] font-black">{r.toFixed(1)}★</span>
+                              <span className="text-[9px] font-bold opacity-90 whitespace-nowrap">{shortName}</span>
                             </div>
-                            <div className="flex items-center gap-1.5 text-rose-500">
-                              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                              {redPct}%
-                            </div>
-                          </div>
-                        </div>
-                        <div className="h-2.5 rounded-full bg-slate-100 p-0.5 flex gap-0.5">
-                          <div style={{ width: `${greenPct}%` }} className="h-full bg-emerald-500 rounded-l-full shadow-[0_0_10px_rgba(16,185,129,0.2)]" />
-                          <div style={{ width: `${amberPct}%` }} className="h-full bg-amber-400" />
-                          <div style={{ width: `${redPct}%` }} className="h-full bg-rose-500 rounded-r-full shadow-[0_0_10px_rgba(244,63,94,0.2)]" />
-                        </div>
+                          );
+                        })}
                       </div>
                     </div>
+                  );
+                })}
 
-                    <div className="flex flex-wrap gap-2.5 p-6 bg-slate-50/30 rounded-[2.5rem] border border-slate-100/50">
-                      {brandBranches.map(a => {
-                        const r = a.avg_rating_period ?? 0;
-                        const alpha = Math.max(0.4, Math.min(1, a.total_reviews_period / 30));
-                        let baseColor = '16, 185, 129';
-                        if (r < 4.5) baseColor = '52, 211, 153';
-                        if (r < 4.0) baseColor = '251, 191, 36';
-                        if (r < 3.5) baseColor = '251, 146, 60';
-                        if (r < 3.0) baseColor = '244, 63, 94';
-                        const isTop = r >= 4.5;
-                        const useDarkText = (r >= 3.0 && r < 4.5) || alpha < 0.7;
-                        
+                <div className="flex flex-wrap items-center gap-6 mt-6 pt-6 border-t border-slate-100">
+                  <div className="flex items-center gap-4">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Quality Legend:" /></span>
+                    <div className="flex gap-2">
+                      {[
+                        { label: '4.5+', color: '#10B981' },
+                        { label: '4.0+', color: '#34D399' },
+                        { label: '3.5+', color: '#FBBF24' },
+                        { label: '3.0+', color: '#FB923C' },
+                        { label: '<3.0', color: '#F43F5E' },
+                      ].map(s => (
+                        <div key={s.label} className="flex items-center gap-1">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                          <span className="text-[9px] font-bold text-slate-500">{s.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-1.5 rounded-full bg-slate-400 opacity-40" />
+                    <span className="text-[8px] font-bold text-slate-500">{t('Opacity = Review Volume')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* ── NEW: Period-wise Rating Change per Brand ── */}
+          <Card>
+            <SectionHeader title={`${t('Rating Change Across Periods')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-6 space-y-5">
+              {brandSummaries.map((b, bIdx) => {
+                const p3 = b.monthly[2]?.avg;
+                const p2 = b.monthly[1]?.avg;
+                const p1 = b.monthly[0]?.avg;
+                const trend = p1 != null && p3 != null ? p1 - p3 : null;
+                return (
+                  <div key={b.brand} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                        <span className="text-xs font-black text-slate-700">{b.brand}</span>
+                      </div>
+                      {trend != null && (
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${trend > 0 ? 'bg-emerald-50 text-emerald-600' : trend < 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-500'}`}>
+                          {trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} {Math.abs(trend).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {[
+                        { label: periodInfo.p3.short, val: p3, accent: 'slate' },
+                        { label: periodInfo.p2.short, val: p2, accent: 'amber' },
+                        { label: periodInfo.p1.short, val: p1, accent: 'emerald' },
+                      ].map((p, i) => {
+                        const pct = p.val != null ? (p.val / 5) * 100 : 0;
                         return (
-                          <div key={a.id}
-                               className={`w-8 h-8 rounded-full flex items-center justify-center text-[9px] font-black cursor-help transition-all duration-300 hover:scale-150 hover:z-20 border border-white/50 ${useDarkText ? 'text-slate-900' : 'text-white'} ${isTop ? 'ring-2 ring-emerald-500/10 ring-offset-1' : ''}`}
-                               style={{ 
-                                 backgroundColor: `rgba(${baseColor}, ${alpha})`,
-                                 boxShadow: isTop ? `0 4px 12px rgba(${baseColor}, 0.3)` : 'inset 0 1px 2px rgba(255,255,255,0.1)'
-                               }}
-                               title={`${a.branch_name}\n${r.toFixed(2)} ★ · ${a.total_reviews_period} reviews`}>
-                            {r.toFixed(1)}
+                          <div key={i} className="flex-1">
+                            <div className="text-[8px] font-bold text-slate-400 mb-1 text-center truncate">{p.label}</div>
+                            <div className="h-7 bg-slate-100 rounded-lg overflow-hidden relative">
+                              <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-lg animate-grow-width flex items-center justify-center"
+                                style={{ width: `${Math.max(pct, 5)}%`, backgroundColor: b.color, opacity: p.accent === 'emerald' ? 1 : p.accent === 'amber' ? 0.7 : 0.45, animationDelay: `${bIdx * 100 + i * 150}ms` }}>
+                                {p.val != null && pct > 20 && <span className="text-[9px] font-black text-white">{p.val.toFixed(2)}</span>}
+                              </div>
+                            </div>
                           </div>
                         );
                       })}
@@ -693,75 +1514,159 @@ export default function DashboardView({ data }: DashboardProps) {
                   </div>
                 );
               })}
-
-              <div className="flex flex-wrap items-center gap-6 mt-6 pt-6 border-t border-slate-100">
-                <div className="flex items-center gap-4">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Quality Legend:</span>
-                  <div className="flex gap-2">
-                    {[
-                      { label: '4.5+', color: '#10B981' },
-                      { label: '4.0+', color: '#34D399' },
-                      { label: '3.5+', color: '#FBBF24' },
-                      { label: '3.0+', color: '#FB923C' },
-                      { label: '<3.0', color: '#F43F5E' },
-                    ].map(s => (
-                      <div key={s.label} className="flex items-center gap-1">
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                        <span className="text-[9px] font-bold text-slate-500">{s.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="h-4 w-[1px] bg-slate-200 hidden sm:block" />
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-1.5 rounded-full bg-slate-400 opacity-40" />
-                  <span className="text-[8px] font-bold text-slate-500">Opacity = Review Volume</span>
-                </div>
-              </div>
-            </div>
             </div>
           </Card>
 
-          {/* City-wise Performance */}
+          {/* ── NEW: Review Growth Trend (period-over-period volume) ── */}
           <Card>
-            <SectionHeader title="City-wise Brand Performance" sub="How target and competitors compare in each city" />
+            <SectionHeader title={`${t('Review Growth Trend')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-6 space-y-4">
+              {brandSummaries.map((b, bIdx) => {
+                const reviews = [...b.monthly].reverse().map(m => m.reviews);
+                const maxRev = Math.max(...reviews, 1);
+                return (
+                  <div key={b.brand} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                      <span className="text-xs font-black text-slate-700">{b.brand}</span>
+                      <span className="text-[10px] font-bold text-slate-400 ml-auto">{b.totalReviews.toLocaleString()} total</span>
+                    </div>
+                    <div className="flex items-end gap-2 h-16">
+                      {[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short].map((label, i) => {
+                        const val = reviews[i] ?? 0;
+                        const hPct = (val / maxRev) * 100;
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center">
+                            <div className="w-full flex justify-center">
+                              <div className="w-full max-w-[60px] rounded-t-lg animate-grow-height"
+                                style={{ height: `${Math.max(hPct, 5)}%`, backgroundColor: b.color, opacity: i === 2 ? 1 : i === 1 ? 0.7 : 0.4, animationDelay: `${bIdx * 100 + i * 150}ms` }}>
+                              </div>
+                            </div>
+                            <span className="text-[8px] font-black text-slate-500 mt-1">{val}</span>
+                            <span className="text-[7px] font-bold text-slate-400 truncate max-w-full">{label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* ── NEW: City-wise Rating Graph (visual bars before table) ── */}
+          <Card>
+            <SectionHeader title={`${t('City-wise Rating Comparison')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-6 space-y-4">
+              {cityBreakdown.slice(0, 10).map((row, rIdx) => (
+                <div key={row.city} className="animate-fade-slide-up" style={{ animationDelay: `${rIdx * 60}ms` }}>
+                  <div className="text-[10px] font-black text-slate-600 uppercase tracking-tight mb-2">{row.city} <span className="text-slate-400 font-bold">({row.totalBranches} {t('branches')})</span></div>
+                  <div className="flex items-center gap-2">
+                    {brandSummaries.map(bs => {
+                      const cell = row.brands.find(b => b.brand === bs.brand);
+                      if (!cell) return <div key={bs.brand} className="flex-1 h-5 bg-slate-50 rounded" />;
+                      const rating = cell.avgRating ?? 0;
+                      const pct = (rating / 5) * 100;
+                      return (
+                        <div key={bs.brand} className="flex-1">
+                          <div className="h-5 bg-slate-100 rounded-md overflow-hidden relative">
+                            <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-md animate-grow-width flex items-center justify-end pe-1"
+                              style={{ width: `${pct}%`, backgroundColor: bs.color, animationDelay: `${rIdx * 60 + 200}ms` }}>
+                              <span className="text-[7px] font-black text-white">{rating.toFixed(1)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-3 pt-3 border-t border-slate-100">
+                {brandSummaries.map(bs => (
+                  <div key={bs.brand} className="flex items-center gap-1.5">
+                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: bs.color }} />
+                    <span className="text-[9px] font-black text-slate-600">{bs.brand}</span>
+                    {bs.isTarget ? (
+                      <span className="text-[7px] font-black px-1 py-0 bg-indigo-50 text-indigo-500 rounded"><BiInline en="YOUR BRAND" /></span>
+                    ) : (
+                      <span className="text-[7px] font-black px-1 py-0 bg-slate-100 text-slate-400 rounded"><BiInline en="Competitor" /></span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          {/* ═══ DATA TABLES (at the end) ═══ */}
+
+          {/* Brand Comparison Table */}
+          <Card>
+            <SectionHeader title={`${t('Brand Comparison')}`} sub={`${periodInfo.label}`} />
             <div className="mt-6 overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-start text-xs">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">City</th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-start"><BiInline en="Brand" /></th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end">{t('Avg Rating')} ({periodInfo.p1.short})</th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end">{t('Reviews')} ({periodInfo.p1.short})</th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Total Branches" /></th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Overall Avg Rating (All Periods)" /></th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Overall Total Reviews" /></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {brandSummaries.map(b => (
+                    <tr key={b.brand} className="hover:bg-slate-50/50">
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2 text-start">
+                          <BrandBadge brand={b.brand} color={b.color} />
+                          {b.isTarget && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase"><BiInline en="Your Brand" /></span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.currentPeriodAvg?.toFixed(2) ?? '—'} ★</td>
+                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.currentPeriodReviews.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.branches}</td>
+                      <td className="px-3 py-3 text-end font-bold text-slate-600">{b.avgRating?.toFixed(2) ?? '—'} ★</td>
+                      <td className="px-3 py-3 text-end font-bold text-slate-600">{b.totalReviews.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* City-wise Data Table */}
+          <Card>
+            <SectionHeader title={`${t('City-wise Brand Performance')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-start text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-start"><BiInline en="City" /></th>
                     {brandSummaries.map(b => (
                       <th key={b.brand} className="px-3 py-3 text-center">
                         <BrandBadge brand={b.brand} color={b.color} />
                       </th>
                     ))}
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total</th>
+                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Total" /></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {cityBreakdown.map(row => (
                     <tr key={row.city} className="hover:bg-slate-50/50 transition-colors">
-                      {/* City Column */}
-                      <td className="px-4 py-4">
+                      <td className="px-4 py-4 text-start">
                         <div className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{row.city}</div>
-                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{row.totalBranches} Branches Market</div>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{row.totalBranches} {t('Branches Market')}</div>
                       </td>
-
-                      {/* Brand Columns */}
                       {brandSummaries.map(bs => {
                         const cell = row.brands.find(b => b.brand === bs.brand);
                         const rating = cell?.avgRating ?? 0;
-                        
                         return (
                           <td key={bs.brand} className={`px-4 py-4 text-center ${bs.isTarget ? 'bg-slate-50/50' : ''}`}>
                             {cell ? (
                               <div className="flex flex-col items-center">
-                                <div className="text-[11px] font-black text-slate-900 tracking-tight">
-                                  {rating.toFixed(2)} ★
-                                </div>
-                                <div className="text-[9px] font-bold text-slate-500 mt-0.5 uppercase tracking-tighter">
-                                  {cell.branches} Br · {cell.reviews.toLocaleString()} Rev
-                                </div>
+                                <div className="text-[11px] font-black text-slate-900 tracking-tight">{rating.toFixed(2)} ★</div>
+                                <div className="text-[9px] font-bold text-slate-500 mt-0.5 uppercase tracking-tighter">{cell.branches} {t('Br')} · {cell.reviews.toLocaleString()} {t('Rev')}</div>
                               </div>
                             ) : (
                               <div className="text-[10px] font-bold text-slate-200">—</div>
@@ -769,7 +1674,7 @@ export default function DashboardView({ data }: DashboardProps) {
                           </td>
                         );
                       })}
-                      <td className="px-4 py-4 text-right">
+                      <td className="px-4 py-4 text-end">
                         <div className="text-[11px] font-black text-slate-500">{row.totalBranches}</div>
                       </td>
                     </tr>
@@ -786,54 +1691,204 @@ export default function DashboardView({ data }: DashboardProps) {
          ═══════════════════════════════════════════════════════ */}
       {activeTab === 'branches' && (
         <>
+          {/* ── Branch-wise Visual Graphs (before table) ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <SectionHeader title={`${t('Branch Rating Distribution')}`} sub={`${periodInfo.label}`} />
+              <div className="mt-6">
+                {(() => {
+                  const bands = [
+                    { label: '4.5+ Excellent', min: 4.5, max: 6, color: '#10B981' },
+                    { label: '4.0–4.4 Good', min: 4.0, max: 4.5, color: '#34D399' },
+                    { label: '3.5–3.9 Average', min: 3.5, max: 4.0, color: '#FBBF24' },
+                    { label: '3.0–3.4 Below Avg', min: 3.0, max: 3.5, color: '#FB923C' },
+                    { label: 'Below 3.0 Poor', min: 0, max: 3.0, color: '#F43F5E' },
+                  ];
+                  return (
+                    <div className="space-y-5">
+                      {bands.map((band, bIdx) => (
+                        <div key={band.label} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 80}ms` }}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: band.color }} />
+                            <span className="text-[10px] font-black text-slate-600">{band.label}</span>
+                          </div>
+                          <div className="space-y-1">
+                            {brandSummaries.map(bs => {
+                              const brandBranches = analytics.filter(a => a.brand === bs.brand && getBranchRating(a) > 0);
+                              const bandCount = brandBranches.filter(a => {
+                                const r = getBranchRating(a);
+                                return r >= band.min && r < band.max;
+                              }).length;
+                              const total = brandBranches.length || 1;
+                              const pct = (bandCount / total) * 100;
+                              return (
+                                <div key={bs.brand} className="flex items-center gap-2">
+                                  <div className="min-w-[80px] flex items-center gap-1.5">
+                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: bs.color }} />
+                                    <span className="text-[9px] font-black text-slate-500 truncate">{bs.brand}</span>
+                                    {bs.isTarget && <span className="text-[7px] font-black px-1 py-0 bg-indigo-50 text-indigo-500 rounded">YOU</span>}
+                                  </div>
+                                  <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden">
+                                    <div className="h-full rounded animate-grow-width flex items-center px-1"
+                                      style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: bs.color, animationDelay: `${bIdx * 80 + 200}ms` }}>
+                                      {pct > 15 && <span className="text-[8px] font-black text-white">{bandCount}</span>}
+                                    </div>
+                                  </div>
+                                  <span className="text-[9px] font-black text-slate-400 min-w-[55px] text-right">{bandCount} ({pct.toFixed(0)}%)</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {/* Legend */}
+                      <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-100">
+                        {brandSummaries.map(bs => (
+                          <span key={bs.brand} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: bs.color }} />
+                            {bs.brand} {bs.isTarget ? `(${t('Your Brand')})` : `(${t('Competitor')})`}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </Card>
+
+            <Card>
+              <SectionHeader title={`${t('Top Performers')} / ${t('Bottom Performers')}`} sub={`${periodInfo.label}`} />
+              <div className="mt-6">
+                {(() => {
+                  const sorted = [...analytics]
+                    .filter(a => getBranchRating(a) > 0)
+                    .sort((a, b) => getBranchRating(b) - getBranchRating(a));
+                  const top5 = sorted.slice(0, 5);
+                  const bottom5 = sorted.slice(-5).reverse();
+                  const renderEntry = (a: BranchAnalytics, i: number, variant: 'top' | 'bottom', rank: number) => {
+                    const isTarget = a.brand === targetBrand;
+                    const bgClass = variant === 'top' ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100';
+                    const textClass = variant === 'top' ? 'text-emerald-600' : 'text-rose-600';
+                    return (
+                      <div key={a.id} className={`flex items-center gap-2 p-2.5 rounded-lg border ${bgClass} animate-fade-slide-up`} style={{ animationDelay: `${i * 80}ms` }}>
+                        <span className={`text-[10px] font-black ${textClass} w-5`}>#{rank}</span>
+                        <div className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: colorMap[a.brand] || '#94A3B8' }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-900 truncate">{getBranchDisplayName(a)}</span>
+                            {isTarget ? (
+                              <span className="text-[7px] font-black px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded-md uppercase whitespace-nowrap"><BiInline en="Your Brand" /></span>
+                            ) : (
+                              <span className="text-[7px] font-black px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-md uppercase whitespace-nowrap"><BiInline en="Competitor" /></span>
+                            )}
+                          </div>
+                          <div className="text-[8px] font-bold text-slate-400 mt-0.5">
+                            <span style={{ color: colorMap[a.brand] }}>{a.brand}</span>
+                            {a.city && <span className="text-slate-300"> · {a.city}</span>}
+                            <span className="text-slate-300"> · {a.total_reviews_period} {t('reviews')}</span>
+                          </div>
+                        </div>
+                        <span className={`text-[11px] font-black ${textClass}`}>{getBranchRating(a).toFixed(2)}★</span>
+                      </div>
+                    );
+                  };
+                  return (
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <div className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-3">★ Top 5 — Highest Rated</div>
+                        <div className="space-y-2">
+                          {top5.map((a, i) => renderEntry(a, i, 'top', i + 1))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-3">↓ Bottom 5 — Needs Improvement</div>
+                        <div className="space-y-2">
+                          {bottom5.map((a, i) => renderEntry(a, i, 'bottom', sorted.length - 4 + i))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Branch Reviews per Period — Bar Chart ── */}
+          <Card>
+            <SectionHeader title={`Branch Review Volume by Period`} sub={`Reviews per period for each brand — ${periodInfo.label}`} />
+            <div className="mt-4">
+              <GroupedBarChart
+                groups={brandSummaries.map(b => b.brand)}
+                series={[
+                  { label: periodInfo.p1.short, data: brandSummaries.map(b => b.monthly[0]?.reviews ?? 0), color: '#10B981' },
+                  { label: periodInfo.p2.short, data: brandSummaries.map(b => b.monthly[1]?.reviews ?? 0), color: '#FBBF24' },
+                  { label: periodInfo.p3.short, data: brandSummaries.map(b => b.monthly[2]?.reviews ?? 0), color: '#94A3B8' },
+                ]}
+                height={260}
+                yLabel="Reviews"
+              />
+              <div className="flex flex-wrap justify-center gap-4 mt-3">
+                {[
+                  { label: periodInfo.p1.short, color: '#10B981' },
+                  { label: periodInfo.p2.short, color: '#FBBF24' },
+                  { label: periodInfo.p3.short, color: '#94A3B8' },
+                ].map(s => (
+                  <span key={s.label} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
+                    {s.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Card>
+
           <Card>
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
               <SectionHeader
-                title="Branch-wise Data"
-                sub={`${filteredBranches.length} branches — all columns from the Excel report`}
+                title={t('Branch-wise Data')}
+                sub={`${filteredBranches.length} ${t('branches')} — ${t('all columns from the Excel report')}`}
               />
               <div className="flex flex-wrap gap-2">
                 <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)}
-                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
                   <option value="All">All Brands</option>
                   {brandSummaries.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
                 </select>
                 <select value={filterCity} onChange={e => setFilterCity(e.target.value)}
-                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
                   <option value="All">All Cities</option>
                   {cities.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <input type="text" placeholder="Search branch..." value={search} onChange={e => setSearch(e.target.value)}
-                       className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 w-44" />
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 w-44" />
               </div>
             </div>
 
             <div className="overflow-x-auto -mx-2">
-              <table className="w-full text-left text-xs min-w-[1600px]">
+              <table className="w-full text-start text-xs min-w-[1600px]">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    <TH>Brand</TH>
-                    <TH clickable onClick={() => handleSort('name')}>Branch Name {sortCol === 'name' ? (sortAsc ? '↑' : '↓') : ''}</TH>
-                    <TH>Address</TH>
-                    <TH>Maps</TH>
-                    <TH>Hours</TH>
-                    <TH>Phone</TH>
-                    <TH>Peak Time</TH>
-                    <TH>Busy Hours</TH>
-                    <TH clickable onClick={() => handleSort('rating')} align="right">Avg ★ {sortCol === 'rating' ? (sortAsc ? '↑' : '↓') : ''}</TH>
-                    <TH clickable onClick={() => handleSort('reviews')} align="right">Reviews {sortCol === 'reviews' ? (sortAsc ? '↑' : '↓') : ''}</TH>
-                    <TH align="right">P1 Rev</TH>
-                    <TH align="right">P1 ★</TH>
-                    <TH align="right">P2 Rev</TH>
-                    <TH align="right">P2 ★</TH>
-                    <TH align="right">P3 Rev</TH>
-                    <TH align="right">P3 ★</TH>
+                    <TH>{t('Brand')}</TH>
+                    <TH clickable onClick={() => handleSort('name')}>{t('Branch Name')} {sortCol === 'name' ? (sortAsc ? '↑' : '↓') : ''}</TH>
+                    <TH>{t('Address')}</TH>
+                    <TH>{t('Maps')}</TH>
+                    <TH>{t('Hours')}</TH>
+                    <TH>{t('Phone')}</TH>
+                    <TH>{t('Peak Time')}</TH>
+                    <TH>{t('Busy Hours')}</TH>
+                    <TH clickable onClick={() => handleSort('rating')} align="right">{t('Avg Rating')} ({periodInfo.p1.short}) {sortCol === 'rating' ? (sortAsc ? '↑' : '↓') : ''}</TH>
+                    <TH clickable onClick={() => handleSort('reviews')} align="right">{t('Reviews')} {sortCol === 'reviews' ? (sortAsc ? '↑' : '↓') : ''}</TH>
+                    <TH align="right">{periodInfo.p1.short} Rev</TH>
+                    <TH align="right">{periodInfo.p1.short} ★</TH>
+                    <TH align="right">{periodInfo.p2.short} Rev</TH>
+                    <TH align="right">{periodInfo.p2.short} ★</TH>
+                    <TH align="right">{periodInfo.p3.short} Rev</TH>
+                    <TH align="right">{periodInfo.p3.short} ★</TH>
                     <TH align="center">5★</TH>
                     <TH align="center">4★</TH>
                     <TH align="center">3★</TH>
                     <TH align="center">2★</TH>
                     <TH align="center">1★</TH>
-                    <TH align="right">Detail</TH>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -842,122 +1897,36 @@ export default function DashboardView({ data }: DashboardProps) {
                       <td className="px-2 py-3">
                         <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
                       </td>
-                      <td className="px-2 py-3 font-black text-slate-900 whitespace-nowrap">{a.branch_name}</td>
+                      <td className="px-2 py-3 font-black text-slate-900 whitespace-nowrap">{getBranchDisplayName(a)}</td>
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[180px] truncate" title={a.address || ''}>{a.address || '—'}</td>
                       <td className="px-2 py-3">
                         {a.google_maps_link ? (
-                          <a href={a.google_maps_link} target="_blank" rel="noopener" className="text-[10px] font-bold text-indigo-500 hover:underline whitespace-nowrap">View Map</a>
+                          <a href={a.google_maps_link} target="_blank" rel="noopener" className="text-[10px] font-bold text-indigo-500 hover:underline whitespace-nowrap">{t('View Map')}</a>
                         ) : '—'}
                       </td>
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[140px] truncate" title={a.business_hours || ''}>{a.business_hours || '—'}</td>
                       <td className="px-2 py-3 text-[10px] text-slate-600 whitespace-nowrap">{a.phone || '—'}</td>
                       <td className="px-2 py-3 text-[10px] font-bold text-slate-600 whitespace-nowrap">{a.peak_time || '—'}</td>
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[140px] truncate" title={a.busy_hours_summary || ''}>{a.busy_hours_summary || '—'}</td>
-                      <td className="px-2 py-3 text-right font-black text-slate-900">{a.avg_rating_period?.toFixed(2) ?? '—'}</td>
-                      <td className="px-2 py-3 text-right font-black text-slate-900">{a.total_reviews_period}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_1_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.period_1_avg_rating?.toFixed(2) ?? '—'}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_2_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.period_2_avg_rating?.toFixed(2) ?? '—'}</td>
-                      <td className="px-2 py-3 text-right text-slate-700 font-bold">{a.period_3_reviews}</td>
-                      <td className="px-2 py-3 text-right text-slate-500">{a.period_3_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-end font-black text-slate-900">{getBranchRating(a).toFixed(2)}</td>
+                      <td className="px-2 py-3 text-end font-black text-slate-900">{a.total_reviews_period}</td>
+                      <td className="px-2 py-3 text-end text-slate-700 font-bold">{a.period_1_reviews}</td>
+                      <td className="px-2 py-3 text-end text-slate-500">{a.period_1_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-end text-slate-700 font-bold">{a.period_2_reviews}</td>
+                      <td className="px-2 py-3 text-end text-slate-500">{a.period_2_avg_rating?.toFixed(2) ?? '—'}</td>
+                      <td className="px-2 py-3 text-end text-slate-700 font-bold">{a.period_3_reviews}</td>
+                      <td className="px-2 py-3 text-end text-slate-500">{a.period_3_avg_rating?.toFixed(2) ?? '—'}</td>
                       <td className="px-2 py-3 text-center text-emerald-600 font-bold">{a.star_5_count}</td>
                       <td className="px-2 py-3 text-center text-emerald-400 font-bold">{a.star_4_count}</td>
                       <td className="px-2 py-3 text-center text-amber-500 font-bold">{a.star_3_count}</td>
                       <td className="px-2 py-3 text-center text-rose-400 font-bold">{a.star_2_count}</td>
                       <td className="px-2 py-3 text-center text-rose-600 font-bold">{a.star_1_count}</td>
-                      <td className="px-2 py-3 text-right">
-                        <button onClick={() => setSelectedId(selectedId === a.id ? null : a.id)}
-                                className="text-[10px] font-black px-2 py-1 rounded-md bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 text-slate-600">
-                          {selectedId === a.id ? 'Close' : 'View'}
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </Card>
-
-          {/* Selected Branch Detail */}
-          {selected && (
-            <Card>
-              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <BrandBadge brand={selected.brand} color={colorMap[selected.brand] || '#94A3B8'} />
-                    {selected.brand === targetBrand && (
-                      <span className="text-[9px] font-black px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase">Target</span>
-                    )}
-                  </div>
-                  <h3 className="text-xl font-black text-slate-900 tracking-tight">{selected.branch_name}</h3>
-                  {selected.address && <p className="text-xs text-slate-500 mt-1">{selected.address}</p>}
-                  {selected.google_maps_link && (
-                    <a href={selected.google_maps_link} target="_blank" rel="noopener" className="text-xs font-bold text-indigo-500 hover:underline mt-1 inline-block">
-                      Open in Google Maps
-                    </a>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <Mini label="Avg Rating" value={selected.avg_rating_period?.toFixed(2) ?? '—'} unit="★" />
-                  <Mini label="Reviews" value={selected.total_reviews_period.toString()} />
-                  <Mini label="Peak" value={selected.peak_time || '—'} />
-                  <Mini label="Phone" value={selected.phone || '—'} />
-                </div>
-              </div>
-
-              {selected.business_hours && (
-                <p className="text-[11px] font-bold text-slate-400 mb-2">
-                  <span className="uppercase tracking-wider mr-2 text-slate-500">Hours:</span>{selected.business_hours}
-                </p>
-              )}
-              {selected.busy_hours_summary && (
-                <p className="text-[11px] font-bold text-slate-400 mb-4">
-                  <span className="uppercase tracking-wider mr-2 text-slate-500">Busy:</span>{selected.busy_hours_summary}
-                </p>
-              )}
-
-              {/* Monthly breakdown */}
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                {[
-                  { label: 'Period 1 (Newest)', reviews: selected.period_1_reviews, avg: selected.period_1_avg_rating },
-                  { label: 'Period 2', reviews: selected.period_2_reviews, avg: selected.period_2_avg_rating },
-                  { label: 'Period 3 (Oldest)', reviews: selected.period_3_reviews, avg: selected.period_3_avg_rating },
-                ].map((m, i) => (
-                  <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="text-[9px] font-black text-slate-400 uppercase">{m.label}</div>
-                    <div className="text-lg font-black text-slate-900 leading-none mt-1">{m.reviews} reviews</div>
-                    <div className="text-[10px] font-bold text-slate-500">{m.avg != null ? `${m.avg.toFixed(2)} ★` : '—'}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Star breakdown */}
-              <div className="mb-6">
-                <div className="h-5 w-full flex rounded-lg overflow-hidden border border-slate-100">
-                  <Seg n={selected.star_5_count} t={selected.total_reviews_period || 1} c="#10B981" />
-                  <Seg n={selected.star_4_count} t={selected.total_reviews_period || 1} c="#34D399" />
-                  <Seg n={selected.star_3_count} t={selected.total_reviews_period || 1} c="#FBBF24" />
-                  <Seg n={selected.star_2_count} t={selected.total_reviews_period || 1} c="#FB7185" />
-                  <Seg n={selected.star_1_count} t={selected.total_reviews_period || 1} c="#F43F5E" />
-                </div>
-                <div className="grid grid-cols-5 mt-1 text-[9px] font-black text-slate-400">
-                  <span>5★ {selected.star_5_count}</span>
-                  <span className="text-center">4★ {selected.star_4_count}</span>
-                  <span className="text-center">3★ {selected.star_3_count}</span>
-                  <span className="text-center">2★ {selected.star_2_count}</span>
-                  <span className="text-right">1★ {selected.star_1_count}</span>
-                </div>
-              </div>
-
-              {/* Popular Times Heatmap for this branch */}
-              {selected.popular_times_grid ? (
-                <PopularTimesHeatmap grid={selected.popular_times_grid} />
-              ) : (
-                <p className="text-sm text-slate-400 italic">Popular times data not available for this branch.</p>
-              )}
-            </Card>
-          )}
         </>
       )}
 
@@ -969,28 +1938,28 @@ export default function DashboardView({ data }: DashboardProps) {
           {/* Top & Bottom visual chart */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
-              <SectionHeader title="Top 15 Branches" sub="Highest rated branches across all brands" />
+              <SectionHeader title={t('Top 15 Branches')} sub={t('Highest rated branches across all brands')} />
               <div className="mt-4 overflow-x-auto">
                 <RankingChart
                   items={rankings.slice(0, 15).map(a => ({
-                    label: a.branch_name,
-                    value: a.avg_rating_period ?? 0,
+                    label: getBranchDisplayName(a),
+                    value: getBranchRating(a),
                     color: colorMap[a.brand] || '#94A3B8',
-                    sub: `${a.total_reviews_period}r`,
+                    sub: isAr ? `${a.total_reviews_period} مراجعة` : `${a.total_reviews_period}r`,
                   }))}
                   maxVal={5}
                 />
               </div>
             </Card>
             <Card>
-              <SectionHeader title="Bottom 15 Branches" sub="Lowest rated — focus areas for improvement" />
+              <SectionHeader title={t('Bottom 15 Branches')} sub={t('Lowest rated — focus areas for improvement')} />
               <div className="mt-4 overflow-x-auto">
                 <RankingChart
                   items={[...rankings].reverse().slice(0, 15).map(a => ({
-                    label: a.branch_name,
-                    value: a.avg_rating_period ?? 0,
+                    label: getBranchDisplayName(a),
+                    value: getBranchRating(a),
                     color: colorMap[a.brand] || '#94A3B8',
-                    sub: `${a.total_reviews_period}r`,
+                    sub: isAr ? `${a.total_reviews_period} مراجعة` : `${a.total_reviews_period}r`,
                   }))}
                   maxVal={5}
                 />
@@ -1000,18 +1969,18 @@ export default function DashboardView({ data }: DashboardProps) {
 
           {/* Full Rankings Table */}
           <Card>
-            <SectionHeader title="Full Branch Rankings" sub={`All ${rankings.length} branches ranked by rating`} />
+            <SectionHeader title={t('Full Branch Rankings')} sub={`${t('All')} ${tn(rankings.length)} ${t('branches ranked by rating')}`} />
             <div className="mt-6 overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-start text-xs">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    <TH align="center">Rank</TH>
-                    <TH>Brand</TH>
-                    <TH>Branch</TH>
-                    <TH>City</TH>
-                    <TH>Address</TH>
-                    <TH align="right">Avg Rating</TH>
-                    <TH align="right">Reviews</TH>
+                    <TH align="center">{t('Rank')}</TH>
+                    <TH>{t('Brand')}</TH>
+                    <TH>{t('Branch')}</TH>
+                    <TH>{t('City')}</TH>
+                    <TH>{t('Address')}</TH>
+                    <TH align="right">{t('Avg Rating')}</TH>
+                    <TH align="right">{t('Reviews')}</TH>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -1021,24 +1990,23 @@ export default function DashboardView({ data }: DashboardProps) {
                     return (
                       <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${isTop ? 'bg-emerald-50/30' : isBottom ? 'bg-rose-50/30' : ''}`}>
                         <td className="px-3 py-3 text-center">
-                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-black ${
-                            isTop ? 'bg-emerald-100 text-emerald-700' : isBottom ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
-                          }`}>
-                            {i + 1}
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[10px] font-black ${isTop ? 'bg-emerald-100 text-emerald-700' : isBottom ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                            {tn(i + 1)}
                           </span>
                         </td>
                         <td className="px-3 py-3">
                           <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
                         </td>
-                        <td className="px-3 py-3 font-black text-slate-900">{a.branch_name}</td>
+                        <td className="px-3 py-3 font-black text-slate-900">{getBranchDisplayName(a)}</td>
                         <td className="px-3 py-3 text-slate-500 uppercase text-[11px] tracking-tight">{a.city || '—'}</td>
                         <td className="px-3 py-3 text-[10px] text-slate-500 max-w-[250px] truncate" title={a.address || ''}>{a.address || '—'}</td>
-                        <td className="px-3 py-3 text-right">
+                        <td className="px-3 py-3 text-end">
                           <span className={`font-black ${isTop ? 'text-emerald-600' : isBottom ? 'text-rose-600' : 'text-slate-900'}`}>
-                            {a.avg_rating_period?.toFixed(2)} ★
+                            {tn(getBranchRating(a), { decimals: 2 })} ★
                           </span>
                         </td>
-                        <td className="px-3 py-3 text-right font-bold text-slate-600">{a.total_reviews_period}</td>
+                        <td className="px-3 py-3 text-end font-bold text-slate-600">{tn(a.total_reviews_period)}</td>
                       </tr>
                     );
                   })}
@@ -1054,89 +2022,84 @@ export default function DashboardView({ data }: DashboardProps) {
          ═══════════════════════════════════════════════════════ */}
       {activeTab === 'popular-times' && (
         <>
-          <Card>
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-              <SectionHeader
-                title="Popular Times"
-                sub={`${ptBranches.length} branches have popular times data`}
-              />
-              <select value={ptBrandFilter} onChange={e => { setPtBrandFilter(e.target.value); setPtSelectedId(null); }}
-                      className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
-                <option value="All">All Brands</option>
-                {brandSummaries.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
-              </select>
-            </div>
-
-            {/* Peak Hours Summary Table */}
-            <div className="overflow-x-auto mb-6">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <TH>Brand</TH>
-                    <TH>Branch</TH>
-                    <TH>City</TH>
-                    <TH>Peak Day</TH>
-                    <TH>Peak Hour</TH>
-                    <TH align="right">Peak Busyness</TH>
-                    <TH>Busy Hours</TH>
-                    <TH align="right">Heatmap</TH>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {ptBranches.map(a => (
-                    <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${ptSelectedId === a.id ? 'bg-indigo-50/40' : ''}`}>
-                      <td className="px-2 py-3"><BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} /></td>
-                      <td className="px-2 py-3 font-black text-slate-900">{a.branch_name}</td>
-                      <td className="px-2 py-3 text-slate-500 uppercase text-[11px]">{a.city || '—'}</td>
-                      <td className="px-2 py-3 font-bold text-slate-700">{a.peak_day || '—'}</td>
-                      <td className="px-2 py-3 font-bold text-slate-700">{a.peak_hour || '—'}</td>
-                      <td className="px-2 py-3 text-right">
-                        {a.peak_busyness_pct != null ? (
-                          <span className={`font-black ${a.peak_busyness_pct >= 80 ? 'text-rose-600' : a.peak_busyness_pct >= 50 ? 'text-amber-600' : 'text-slate-700'}`}>
-                            {a.peak_busyness_pct}%
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[200px] truncate" title={a.busy_hours_summary || ''}>{a.busy_hours_summary || '—'}</td>
-                      <td className="px-2 py-3 text-right">
-                        <button onClick={() => setPtSelectedId(ptSelectedId === a.id ? null : a.id)}
-                                className="text-[10px] font-black px-2 py-1 rounded-md bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 text-slate-600">
-                          {ptSelectedId === a.id ? 'Hide' : 'Show'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {ptBranches.length === 0 && (
-              <p className="text-sm text-slate-400 italic text-center py-8">No popular times data available. Run an analysis to scrape popular times.</p>
-            )}
-          </Card>
-
-          {/* Selected Popular Times Heatmap */}
-          {ptSelected?.popular_times_grid && (
+          {/* ── Peak Hours by Brand (visual bars first) ── */}
+          {ptBranches.length > 0 && (
             <Card>
-              <div className="flex items-center gap-3 mb-4">
-                <BrandBadge brand={ptSelected.brand} color={colorMap[ptSelected.brand] || '#94A3B8'} />
-                <h3 className="text-lg font-black text-slate-900">{ptSelected.branch_name}</h3>
-                {ptSelected.city && <span className="text-xs text-slate-400 uppercase">{ptSelected.city}</span>}
+              <SectionHeader title={t('Peak Hours by Brand')} sub={`${t('Average peak busyness comparison —')} ${periodInfo.label}`} />
+              
+              {/* Bilingual Popular Times explanation card */}
+              <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-100/80 text-xs text-slate-600 leading-relaxed space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-500 mt-0.5">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 mb-1">
+                      <Bi en="How to read Peak Busyness & Percentages?" />
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-slate-500 ps-1">
+                      <li>
+                        <Bi en="Scale (0% - 100%): Google's busyness score is relative. 100% represents the absolute busiest hour of the entire week for a branch. | المقياس (0٪ - 100٪): مؤشر الازدحام من Google نسبي. يمثل 100٪ ساعة الذروة القصوى للفرع طوال الأسبوع بأكمله." />
+                      </li>
+                      <li>
+                        <Bi en="Average Peak: Represents the average occupancy during the brand's busiest operating hours across all locations. | متوسط ​​الذروة: يمثل متوسط ​​نسبة إشغال العملاء خلال ساعات التشغيل الأكثر ازدحاماً للعلامة التجارية عبر جميع الفروع." />
+                      </li>
+                      <li>
+                        <Bi en="Peak Time: Shows when the highest customer footfall occurs, helping you identify sweet spots for marketing campaigns, staffing, and promotions. | وقت الذروة: يوضح متى يحدث أكبر إقبال للعملاء، مما يساعدك على تحديد الأوقات الأنسب للحملات التسويقية، التوظيف، والعروض الترويجية." />
+                      </li>
+                    </ul>
+                  </div>
+                </div>
               </div>
-              <PopularTimesHeatmap grid={ptSelected.popular_times_grid} />
+
+              <div className="mt-6 space-y-4">
+                {brandSummaries.map((bs, bIdx) => {
+                  const brandBranches = ptBranches.filter(a => a.brand === bs.brand);
+                  if (brandBranches.length === 0) return null;
+                  const avgPeak = brandBranches.reduce((s, a) => s + (a.peak_busyness_pct ?? 0), 0) / brandBranches.length;
+                  const peakDays = brandBranches.map(a => a.peak_day).filter(Boolean);
+                  const mostCommonPeakDay = (peakDays.length > 0
+                    ? peakDays.sort((a, b) => peakDays.filter(v => v === a).length - peakDays.filter(v => v === b).length).pop()
+                    : '—') || '—';
+                  return (
+                    <div key={bs.brand} className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
+                      <BrandBadge brand={bs.brand} color={bs.color} />
+                      <div className="flex-1">
+                        <div className="h-4 bg-slate-200 rounded-full relative overflow-hidden">
+                          <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full animate-grow-width" style={{ width: `${avgPeak}%`, backgroundColor: bs.color, animationDelay: `${bIdx * 100 + 200}ms` }} />
+                        </div>
+                      </div>
+                      <div className="text-end min-w-[120px]">
+                        <div className="text-xs font-black text-slate-900">
+                          {isAr ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span>{t('avg peak')}</span>
+                              <span dir="ltr">{avgPeak.toFixed(0)}%</span>
+                            </span>
+                          ) : (
+                            `${avgPeak.toFixed(0)}% avg peak`
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {isAr ? `${brandBranches.length} فروع · ${t(mostCommonPeakDay)}` : `${brandBranches.length} branches · ${mostCommonPeakDay}`}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }).filter(Boolean)}
+              </div>
             </Card>
           )}
 
-          {/* Average Hourly Busyness — Line Chart Overlay per Brand */}
+          {/* ── Average Hourly Busyness — Line Chart ── */}
           {ptBranches.length > 0 && (
             <Card>
-              <SectionHeader title="Average Hourly Busyness" sub="Averaged across all branches per brand — shows when each brand is busiest" />
+              <SectionHeader title={t('Average Hourly Busyness')} sub={`${t('Averaged across all branches per brand —')} ${periodInfo.label}`} />
               <div className="mt-4">
                 <HourlyOverlayChart
                   series={brandSummaries.map(bs => {
                     const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
                     if (brandPt.length === 0) return { label: bs.brand, data: Array(24).fill(null), color: bs.color };
-                    // Average across all days and all branches for this brand
                     const avgHour = Array(24).fill(null) as (number | null)[];
                     for (let h = 0; h < 24; h++) {
                       let sum = 0, cnt = 0;
@@ -1164,80 +2127,521 @@ export default function DashboardView({ data }: DashboardProps) {
             </Card>
           )}
 
-          {/* Peak Day Distribution — which days are busiest per brand */}
+          {/* ── Peak Day Distribution + Weekday vs Weekend (Hidden/Removed per user request) ── */}
+          {/* ptBranches.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <SectionHeader title={t('Peak Day Distribution')} sub={`${t('Which day of the week each brand peaks on —')} ${periodInfo.label}`} />
+                <div className="mt-4">
+                  <GroupedBarChart
+                    groups={DAYS.map(d => t(DAY_LABELS[d]))}
+                    series={brandSummaries.map(bs => {
+                      const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
+                      const dayCounts = DAYS.map(day => {
+                        let sum = 0, cnt = 0;
+                        for (const a of brandPt) {
+                          if (!a.popular_times_grid) continue;
+                          const hourly = a.popular_times_grid[day];
+                          if (Array.isArray(hourly)) {
+                            const peak = Math.max(...hourly.filter((v): v is number => v != null));
+                            if (peak > 0) { sum += peak; cnt++; }
+                          }
+                        }
+                        return cnt > 0 ? Math.round(sum / cnt) : 0;
+                      });
+                      return { label: bs.brand, data: dayCounts, color: bs.color };
+                    })}
+                    height={240}
+                    yLabel={isAr ? 'ذروة الازدحام %' : 'Peak Busyness %'}
+                  />
+                  <div className="flex flex-wrap justify-center gap-4 mt-3">
+                    {brandSummaries.map(b => (
+                      <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                        <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
+                        {b.brand}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+
+              <Card>
+                <SectionHeader title={t('Weekday vs Weekend')} sub={`${t('Average busyness comparison —')} ${periodInfo.label}`} />
+                <div className="mt-6 space-y-4">
+                  {brandSummaries.map((bs, bIdx) => {
+                    const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
+                    if (brandPt.length === 0) return null;
+                    const weekdays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
+                    const weekends = ['SATURDAY', 'SUNDAY'] as const;
+                    let wdSum = 0, wdCnt = 0, weSum = 0, weCnt = 0;
+                    for (const a of brandPt) {
+                      if (!a.popular_times_grid) continue;
+                      for (const day of weekdays) {
+                        const hourly = a.popular_times_grid[day];
+                        if (Array.isArray(hourly)) { for (const v of hourly) { if (v != null) { wdSum += v; wdCnt++; } } }
+                      }
+                      for (const day of weekends) {
+                        const hourly = a.popular_times_grid[day];
+                        if (Array.isArray(hourly)) { for (const v of hourly) { if (v != null) { weSum += v; weCnt++; } } }
+                      }
+                    }
+                    const wdAvg = wdCnt > 0 ? Math.round(wdSum / wdCnt) : 0;
+                    const weAvg = weCnt > 0 ? Math.round(weSum / weCnt) : 0;
+                    const maxAvg = Math.max(wdAvg, weAvg, 1);
+                    return (
+                      <div key={bs.brand} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: bs.color }} />
+                          <span className="text-xs font-black text-slate-700">{bs.brand}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{t('Weekdays (Mon–Fri)')}</div>
+                            <div className="h-6 bg-slate-100 rounded-lg relative overflow-hidden">
+                              <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-lg animate-grow-width flex items-center justify-end pe-2"
+                                style={{ width: `${(wdAvg / maxAvg) * 100}%`, backgroundColor: bs.color, animationDelay: `${bIdx * 100 + 200}ms` }}>
+                                <span dir="ltr" className="text-[9px] font-black text-white">{wdAvg}%</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{t('Weekend (Sat–Sun)')}</div>
+                            <div className="h-6 bg-slate-100 rounded-lg relative overflow-hidden">
+                              <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-lg animate-grow-width flex items-center justify-end pe-2"
+                                style={{ width: `${(weAvg / maxAvg) * 100}%`, backgroundColor: bs.color, opacity: 0.7, animationDelay: `${bIdx * 100 + 350}ms` }}>
+                                <span dir="ltr" className="text-[9px] font-black text-white">{weAvg}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }).filter(Boolean)}
+                </div>
+              </Card>
+            </div>
+          ) */}
+
+          {/* NEW: Busyness Level Distribution */}
           {ptBranches.length > 0 && (
             <Card>
-              <SectionHeader title="Peak Day Distribution" sub="Which day of the week each brand peaks on" />
-              <div className="mt-4">
-                <GroupedBarChart
-                  groups={DAYS.map(d => DAY_LABELS[d])}
-                  series={brandSummaries.map(bs => {
-                    const brandPt = ptBranches.filter(a => a.brand === bs.brand && a.popular_times_grid);
-                    const dayCounts = DAYS.map(day => {
-                      let sum = 0, cnt = 0;
-                      for (const a of brandPt) {
-                        if (!a.popular_times_grid) continue;
-                        const hourly = a.popular_times_grid[day];
-                        if (Array.isArray(hourly)) {
-                          const peak = Math.max(...hourly.filter((v): v is number => v != null));
-                          if (peak > 0) { sum += peak; cnt++; }
-                        }
-                      }
-                      return cnt > 0 ? Math.round(sum / cnt) : 0;
-                    });
-                    return { label: bs.brand, data: dayCounts, color: bs.color };
-                  })}
-                  height={240}
-                  yLabel="Peak Busyness %"
-                />
-                <div className="flex flex-wrap justify-center gap-4 mt-3">
-                  {brandSummaries.map(b => (
-                    <span key={b.brand} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                      <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
-                      {b.brand}
-                    </span>
-                  ))}
-                </div>
+              <SectionHeader title={t('Busyness Level Distribution')} sub={`${t('Branch busyness tiers —')} ${periodInfo.label}`} />
+              <div className="mt-6">
+                {(() => {
+                  const tiers = [
+                    { label: 'Very Busy (80%+)', min: 80, max: 101, color: '#F43F5E' },
+                    { label: 'Busy (60–79%)', min: 60, max: 80, color: '#FB923C' },
+                    { label: 'Moderate (40–59%)', min: 40, max: 60, color: '#FBBF24' },
+                    { label: 'Quiet (20–39%)', min: 20, max: 40, color: '#34D399' },
+                    { label: 'Very Quiet (<20%)', min: 0, max: 20, color: '#10B981' },
+                  ];
+                  const total = ptBranches.filter(a => a.peak_busyness_pct != null).length || 1;
+                  return (
+                    <div className="space-y-3">
+                      {tiers.map((tier, tIdx) => {
+                        const count = ptBranches.filter(a => {
+                          const p = a.peak_busyness_pct ?? -1;
+                          return p >= tier.min && p < tier.max;
+                        }).length;
+                        const pct = (count / total) * 100;
+                        return (
+                          <div key={tier.label} className="flex items-center gap-3 animate-fade-slide-up" style={{ animationDelay: `${tIdx * 80}ms` }}>
+                            <div className="min-w-[130px] text-end">
+                              <span className="text-[10px] font-black text-slate-600">{t(tier.label)}</span>
+                            </div>
+                            <div className="flex-1 h-6 bg-slate-100 rounded-lg relative overflow-hidden">
+                              <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-lg animate-grow-width flex items-center ps-2"
+                                style={{ width: `${Math.max(pct, 3)}%`, backgroundColor: tier.color, animationDelay: `${tIdx * 80 + 200}ms` }}>
+                                {pct > 12 && <span className="text-[9px] font-black text-white">{count}</span>}
+                              </div>
+                            </div>
+                            <div className="min-w-[50px] text-end">
+                              <span dir="ltr" className="text-[10px] font-black text-slate-500 inline-flex items-center gap-1">{count} ({pct.toFixed(0)}%)</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </Card>
           )}
 
-          {/* Brand-wise Peak Summary */}
-          {ptBranches.length > 0 && (
+          {/* Selected Popular Times Heatmap */}
+          {ptSelected?.popular_times_grid && (
             <Card>
-              <SectionHeader title="Peak Hours by Brand" sub="Average peak busyness comparison across brands" />
-              <div className="mt-6 space-y-4">
-                {brandSummaries.map(bs => {
-                  const brandBranches = ptBranches.filter(a => a.brand === bs.brand);
-                  if (brandBranches.length === 0) return null;
-                  const avgPeak = brandBranches.reduce((s, a) => s + (a.peak_busyness_pct ?? 0), 0) / brandBranches.length;
-                  const peakDays = brandBranches.map(a => a.peak_day).filter(Boolean);
-                  const mostCommonPeakDay = peakDays.length > 0
-                    ? peakDays.sort((a, b) => peakDays.filter(v => v === a).length - peakDays.filter(v => v === b).length).pop()
-                    : '—';
-                  return (
-                    <div key={bs.brand} className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <BrandBadge brand={bs.brand} color={bs.color} />
-                      <div className="flex-1">
-                        <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${avgPeak}%`, backgroundColor: bs.color }} />
-                        </div>
-                      </div>
-                      <div className="text-right min-w-[120px]">
-                        <div className="text-xs font-black text-slate-900">{avgPeak.toFixed(0)}% avg peak</div>
-                        <div className="text-[10px] text-slate-500">{brandBranches.length} branches · {mostCommonPeakDay}</div>
-                      </div>
-                    </div>
-                  );
-                }).filter(Boolean)}
+              <div className="flex items-center gap-3 mb-4">
+                <BrandBadge brand={ptSelected.brand} color={colorMap[ptSelected.brand] || '#94A3B8'} />
+                <h3 className="text-lg font-black text-slate-900">{getBranchDisplayName(ptSelected)}</h3>
+                {ptSelected.city && <span className="text-xs text-slate-400 uppercase">{ptSelected.city}</span>}
               </div>
+              <PopularTimesHeatmap grid={ptSelected.popular_times_grid} />
             </Card>
           )}
+
+          {/* ═══ DATA TABLE (at the end) ═══ */}
+          <Card>
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+              <SectionHeader
+                title={t('Popular Times Data')}
+                sub={`${ptBranches.length} ${t('branches')} · ${periodInfo.label}`}
+              />
+              <select value={ptBrandFilter} onChange={e => { setPtBrandFilter(e.target.value); setPtSelectedId(null); }}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
+                <option value="All">{t('All Brands')}</option>
+                {brandSummaries.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+              </select>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-start text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <TH>{t('Brand')}</TH>
+                    <TH>{t('Branch')}</TH>
+                    <TH>{t('City')}</TH>
+                    <TH>{t('Peak Day')}</TH>
+                    <TH>{t('Peak Hour')}</TH>
+                    <TH align="right">{t('Peak Busyness')}</TH>
+                    <TH>{t('Busy Hours')}</TH>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {ptBranches.map(a => (
+                    <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${ptSelectedId === a.id ? 'bg-indigo-50/40' : ''}`}>
+                      <td className="px-2 py-3"><BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} /></td>
+                      <td className="px-2 py-3 font-black text-slate-900">{getBranchDisplayName(a)}</td>
+                      <td className="px-2 py-3 text-slate-500 uppercase text-[11px]">{a.city ? t(a.city) : '—'}</td>
+                      <td className="px-2 py-3 font-bold text-slate-700">{a.peak_day ? t(a.peak_day) : '—'}</td>
+                      <td className="px-2 py-3 font-bold text-slate-700">{a.peak_hour ? a.peak_hour : '—'}</td>
+                      <td className="px-2 py-3 text-end">
+                        {a.peak_busyness_pct != null ? (
+                          <span dir="ltr" className={`font-black inline-block ${a.peak_busyness_pct >= 80 ? 'text-rose-600' : a.peak_busyness_pct >= 50 ? 'text-amber-600' : 'text-slate-700'}`}>
+                            {a.peak_busyness_pct}%
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[200px] truncate" title={a.busy_hours_summary || ''}>{a.busy_hours_summary ? tn(t(a.busy_hours_summary)) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {ptBranches.length === 0 && (
+              <p className="text-sm text-slate-400 italic text-center py-8">{t('No popular times data available. Run an analysis to scrape popular times.')}</p>
+            )}
+          </Card>
         </>
+      )}
+
+      {/* ═══ FLOATING AI SUMMARY PANEL ═══ */}
+      {/* Overlay Back-drop */}
+      <div
+        className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity duration-300 ${drawerOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
+          }`}
+        onClick={() => setDrawerOpen(false)}
+      />
+
+      {/* Floating Sparkles Pill Trigger Button */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 no-print">
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="relative flex items-center gap-2 px-5 py-3 rounded-full bg-gradient-to-r from-[#1E88E5] via-[#1565C0] to-[#0D47A1] text-white shadow-[0_4px_20px_rgba(21,101,192,0.4)] hover:shadow-[0_6px_25px_rgba(21,101,192,0.6)] hover:scale-105 active:scale-95 transition-all duration-300 group"
+          title="AI Summary"
+        >
+          {/* Animated breath rings when unopened and has summary */}
+          {aiSummary && !drawerOpen && (
+            <span className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping opacity-75" style={{ animationDuration: '3s' }} />
+          )}
+
+          <svg className="w-5 h-5 transition-transform group-hover:rotate-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+          </svg>
+
+          <span className="font-extrabold text-sm tracking-wide">AI Summary</span>
+        </button>
+      </div>
+
+      {/* Centered Responsive Glassmorphic Modal Popup */}
+      <div
+        className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] sm:w-[580px] max-h-[80vh] bg-white/95 backdrop-blur-2xl border border-slate-100 shadow-2xl rounded-3xl z-50 transition-all duration-300 ease-out flex flex-col no-print ${drawerOpen ? 'scale-100 opacity-100 visible' : 'scale-95 opacity-0 invisible pointer-events-none'
+          }`}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-slate-100 flex flex-col items-center justify-center bg-white/50 backdrop-blur-md relative">
+          <div className="flex flex-col items-center justify-center text-center">
+            <div className="w-9 h-9 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <h3 className="text-base font-black text-slate-900 tracking-tight leading-none">Summary with AI</h3>
+            <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1.5">POWERED BY Wags</p>
+          </div>
+
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            {aiSummary && (
+              <>
+                {/* Copy Button */}
+                <button
+                  onClick={handleCopySummary}
+                  className="p-2 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 transition-colors"
+                  title="Copy to Clipboard"
+                >
+                  {copied ? (
+                    <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                  )}
+                </button>
+
+                {/* Regenerate Button */}
+                <button
+                  onClick={handleRegenerateSummary}
+                  disabled={isGeneratingAi}
+                  className={`p-2 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 transition-colors ${isGeneratingAi ? 'animate-spin text-indigo-600' : ''
+                    }`}
+                  title="Regenerate Summary"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.5" />
+                  </svg>
+                </button>
+              </>
+            )}
+
+            {/* Close Button */}
+            <button
+              onClick={() => setDrawerOpen(false)}
+              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 transition-all hover:rotate-90 duration-200"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable Content Container */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {errorMsg && (
+            <div className="p-5 bg-rose-50 border border-rose-100 rounded-2xl text-rose-800 text-sm">
+              <div className="flex items-center gap-2 mb-2 font-bold">
+                <svg className="w-5 h-5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Regeneration Failed
+              </div>
+              <p className="font-medium text-rose-600 leading-relaxed mb-4">{errorMsg}</p>
+              <button
+                onClick={handleRegenerateSummary}
+                className="px-4 py-2 bg-rose-600 text-white font-bold text-xs rounded-xl hover:bg-rose-700 transition-colors shadow-sm"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {isGeneratingAi ? (
+            <div className="space-y-6 py-4">
+              <div className="text-center py-6">
+                <div className="inline-block relative w-12 h-12">
+                  <div className="absolute inset-0 rounded-full border-4 border-indigo-100 animate-pulse" />
+                  <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+                </div>
+                <h4 className="text-sm font-black text-slate-800 tracking-tight mt-4">Generating AI Intelligence...</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Analyzing ratings and competitive matrices</p>
+              </div>
+
+              {/* Skeleton Blocks */}
+              <div className="space-y-4">
+                <div className="h-6 w-1/3 bg-slate-100 rounded-lg animate-pulse" />
+                <div className="space-y-2">
+                  <div className="h-4 w-full bg-slate-50 rounded animate-pulse" />
+                  <div className="h-4 w-5/6 bg-slate-50 rounded animate-pulse" />
+                  <div className="h-4 w-4/5 bg-slate-50 rounded animate-pulse" />
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-50">
+                <div className="h-6 w-1/4 bg-slate-100 rounded-lg animate-pulse" />
+                <div className="space-y-2">
+                  <div className="h-4 w-full bg-slate-50 rounded animate-pulse" />
+                  <div className="h-4 w-11/12 bg-slate-50 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ) : aiSummary ? (
+            <div className="prose prose-slate max-w-none">
+              <MarkdownRenderer text={aiSummary} />
+            </div>
+          ) : (
+            <div className="text-center py-16 px-4 bg-slate-50/50 rounded-[2.5rem] border border-slate-100">
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-500 mx-auto mb-6">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <h4 className="text-base font-black text-slate-800 tracking-tight mb-2">No AI Summary Cache Available</h4>
+              <p className="text-xs font-medium text-slate-500 max-w-xs mx-auto mb-8 text-balance">
+                You can generate a fresh live AI competitive executive summary utilizing your GMB ratings, reviews, and metrics.
+              </p>
+              <button
+                onClick={handleRegenerateSummary}
+                className="px-6 py-3 bg-indigo-600 text-white font-bold text-xs uppercase tracking-wider rounded-2xl hover:bg-indigo-700 shadow-md shadow-indigo-200 transition-all active:scale-95"
+              >
+                Generate AI Summary
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ═══ EMAIL MODAL ═══ */}
+      {isEmailModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm no-print">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 border border-slate-100 shadow-2xl animate-in zoom-in-95 duration-200" dir={isAr ? 'rtl' : 'ltr'}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-slate-900">
+                {isAr ? 'إرسال التقرير بالبريد' : 'Email Analysis Report'}
+              </h3>
+              <button onClick={() => setIsEmailModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSendEmail} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                  {isAr ? 'عنوان البريد الإلكتروني المستلم' : 'Recipient Email Address'}
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="name@company.com"
+                  value={emailToInput}
+                  onChange={(e) => setEmailToInput(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-800 text-sm focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-bold"
+                  disabled={isSendingEmail || emailStatus === 'success'}
+                />
+              </div>
+
+              {emailStatus === 'success' && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
+                  <svg className="w-4 h-4 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span>{isAr ? 'تم إرسال التقرير بنجاح!' : 'Report sent successfully!'}</span>
+                </div>
+              )}
+
+              {emailStatus === 'error' && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs font-bold flex items-center gap-2">
+                  <svg className="w-4 h-4 shrink-0 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <span className="break-all">{emailErrorMsg}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEmailModalOpen(false)}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-black uppercase tracking-wider rounded-xl transition-colors"
+                  disabled={isSendingEmail}
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-100 transition-all min-w-[80px]"
+                  disabled={isSendingEmail || emailStatus === 'success'}
+                >
+                  {isSendingEmail ? (
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    isAr ? 'إرسال' : 'Send'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>
   );
+}
+
+// ── Custom Resilient Markdown Renderer for Claude Summaries ──
+function MarkdownRenderer({ text }: { text: string }) {
+  const lines = text.split('\n');
+  const renderedElements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = (key: number) => {
+    if (listItems.length > 0) {
+      renderedElements.push(
+        <ul key={`list-${key}`} className="list-none text-center my-3 space-y-2 text-slate-700 text-sm leading-relaxed">
+          {listItems.map((item, idx) => (
+            <li key={idx} dangerouslySetInnerHTML={{ __html: parseInlineStyles(item) }} />
+          ))}
+        </ul>
+      );
+      listItems = [];
+    }
+  };
+
+  const parseInlineStyles = (txt: string) => {
+    return txt.replace(/\*\*(.*?)\*\*/g, '<strong class="font-black text-slate-900">$1</strong>');
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('#')) {
+      flushList(idx);
+      const level = trimmed.match(/^#+/)?.[0].length || 1;
+      const content = trimmed.replace(/^#+\s*/, '');
+      if (level === 1) {
+        renderedElements.push(<h1 key={idx} className="text-xl font-black text-slate-900 tracking-tight mt-6 mb-3 border-b border-slate-100 pb-2 text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />);
+      } else if (level === 2) {
+        renderedElements.push(<h2 key={idx} className="text-base font-black text-indigo-900 tracking-tight mt-5 mb-3 text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />);
+      } else {
+        renderedElements.push(<h3 key={idx} className="text-sm font-bold text-slate-950 mt-4 mb-2 text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />);
+      }
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      const content = trimmed.substring(2);
+      listItems.push(content);
+    } else if (trimmed.startsWith('>')) {
+      flushList(idx);
+      const content = trimmed.replace(/^>\s*/, '');
+      renderedElements.push(
+        <blockquote key={idx} className="border-l-4 border-indigo-500 bg-indigo-50/40 px-4 py-3 my-4 rounded-r-xl text-slate-700 text-sm font-medium leading-relaxed italic text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />
+      );
+    } else if (trimmed === '') {
+      flushList(idx);
+    } else {
+      flushList(idx);
+      renderedElements.push(
+        <p
+          key={idx}
+          className="text-slate-600 text-sm leading-relaxed my-3 text-balance text-center"
+          dangerouslySetInnerHTML={{ __html: parseInlineStyles(trimmed) }}
+        />
+      );
+    }
+  });
+
+  flushList(lines.length);
+
+  return <div className="space-y-1">{renderedElements}</div>;
 }
 
 
@@ -1265,8 +2669,8 @@ function DonutChart({ stars, color, size = 140 }: { stars: [number, number, numb
     const ix1 = cx + inner * Math.cos(endAngle), iy1 = cy + inner * Math.sin(endAngle);
     const ix2 = cx + inner * Math.cos(startAngle), iy2 = cy + inner * Math.sin(startAngle);
     const d = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${ix1},${iy1} A${inner},${inner} 0 ${large} 0 ${ix2},${iy2} Z`;
-    return <path key={i} d={d} fill={STAR_COLORS[i]} className="transition-opacity hover:opacity-80 cursor-help">
-      <title>{STAR_LABELS[i]}: {count} ({(pct * 100).toFixed(1)}%)</title>
+    return <path key={i} d={d} fill={STAR_COLORS[i]} className="transition-opacity hover:opacity-80 cursor-default">
+      <title>{`${STAR_LABELS[i]}: ${count} (${(pct * 100).toFixed(1)}%)`}</title>
     </path>;
   });
 
@@ -1301,6 +2705,7 @@ function MultiLineChart({
   showDots?: boolean;
   showArea?: boolean;
 }) {
+  const { isAr } = useLang();
   const W = 600, H = height, pad = { t: 20, r: 20, b: 36, l: 44 };
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const xStep = labels.length > 1 ? cw / (labels.length - 1) : cw;
@@ -1316,7 +2721,15 @@ function MultiLineChart({
       {yLines.map((v, i) => (
         <g key={i}>
           <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={i === 0 ? undefined : '4,4'} />
-          <text x={pad.l - 8} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 9, fontWeight: 700 }} className="fill-slate-400">{v.toFixed(1)}</text>
+          <text 
+            x={isAr ? W - pad.r + 8 : pad.l - 8} 
+            y={toY(v) + 3} 
+            textAnchor={isAr ? "start" : "end"} 
+            style={{ fontSize: 9, fontWeight: 700 }} 
+            className="fill-slate-400"
+          >
+            {v.toFixed(1)}
+          </text>
         </g>
       ))}
       {/* X labels */}
@@ -1325,7 +2738,16 @@ function MultiLineChart({
       ))}
       {/* Y label */}
       {yLabel && (
-        <text x={12} y={pad.t + ch / 2} textAnchor="middle" transform={`rotate(-90,12,${pad.t + ch / 2})`} style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="fill-slate-400">{yLabel}</text>
+        <text 
+          x={isAr ? W - 12 : 12} 
+          y={pad.t + ch / 2} 
+          textAnchor="middle" 
+          transform={`rotate(${isAr ? 90 : -90},${isAr ? W - 12 : 12},${pad.t + ch / 2})`} 
+          style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} 
+          className="fill-slate-400"
+        >
+          {yLabel}
+        </text>
       )}
       {/* Lines + areas */}
       {series.map((s, si) => {
@@ -1340,8 +2762,8 @@ function MultiLineChart({
             <path d={line} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
             {showDots && validPts.map((p, i) => (
               <g key={i}>
-                <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={s.color} strokeWidth={2.5} className="cursor-help">
-                  <title>{s.label}: {p.v.toFixed(2)}</title>
+                <circle cx={p.x} cy={p.y} r={5} fill="white" stroke={s.color} strokeWidth={2.5} className="cursor-default">
+                  <title>{`${s.label}: ${p.v.toFixed(2)}`}</title>
                 </circle>
               </g>
             ))}
@@ -1364,6 +2786,7 @@ function GroupedBarChart({
   height?: number;
   yLabel?: string;
 }) {
+  const { isAr } = useLang();
   const W = 600, H = height, pad = { t: 16, r: 16, b: 44, l: 48 };
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const maxVal = Math.max(1, ...series.flatMap(s => s.data));
@@ -1379,11 +2802,28 @@ function GroupedBarChart({
       {yLines.map((v, i) => (
         <g key={i}>
           <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={i === 0 ? undefined : '4,4'} />
-          <text x={pad.l - 8} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 9, fontWeight: 700 }} className="fill-slate-400">{v}</text>
+          <text 
+            x={isAr ? W - pad.r + 8 : pad.l - 8} 
+            y={toY(v) + 3} 
+            textAnchor={isAr ? "start" : "end"} 
+            style={{ fontSize: 9, fontWeight: 700 }} 
+            className="fill-slate-400"
+          >
+            {formatArabicDigits(v, isAr)}
+          </text>
         </g>
       ))}
       {yLabel && (
-        <text x={12} y={pad.t + ch / 2} textAnchor="middle" transform={`rotate(-90,12,${pad.t + ch / 2})`} style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="fill-slate-400">{yLabel}</text>
+        <text 
+          x={isAr ? W - 12 : 12} 
+          y={pad.t + ch / 2} 
+          textAnchor="middle" 
+          transform={`rotate(${isAr ? 90 : -90},${isAr ? W - 12 : 12},${pad.t + ch / 2})`} 
+          style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', direction: 'ltr', unicodeBidi: 'bidi-override' }} 
+          className="fill-slate-400"
+        >
+          {yLabel}
+        </text>
       )}
       {groups.map((g, gi) => {
         const gx = pad.l + gi * groupW + groupW / 2;
@@ -1398,11 +2838,11 @@ function GroupedBarChart({
               const bh = toY(0) - by;
               return (
                 <g key={si}>
-                  <rect x={bx} y={by} width={barW - 2} height={Math.max(0, bh)} rx={3} fill={s.color} className="transition-opacity hover:opacity-70 cursor-help">
-                    <title>{s.label}: {val}</title>
+                  <rect x={bx} y={by} width={barW - 2} height={Math.max(0, bh)} rx={3} fill={s.color} className="transition-opacity hover:opacity-70 cursor-default">
+                    <title>{`${s.label}: ${formatArabicDigits(val, isAr)}`}</title>
                   </rect>
                   {val > 0 && bh > 14 && (
-                    <text x={bx + (barW - 2) / 2} y={by + 12} textAnchor="middle" style={{ fontSize: 8, fontWeight: 800 }} fill="white">{val}</text>
+                    <text x={bx + (barW - 2) / 2} y={by + 12} textAnchor="middle" style={{ fontSize: 8, fontWeight: 800 }} fill="white">{formatArabicDigits(val, isAr)}</text>
                   )}
                 </g>
               );
@@ -1414,42 +2854,51 @@ function GroupedBarChart({
   );
 }
 
-/** Horizontal lollipop chart for rankings */
+/** Horizontal progress chart for rankings - completely responsive HTML layout */
 function RankingChart({ items, maxVal }: {
   items: { label: string; value: number; color: string; sub?: string }[];
   maxVal: number;
 }) {
-  const barH = 28, gap = 6, padL = 180, padR = 60;
-  const totalH = items.length * (barH + gap) + 8;
-  const barW = 400;
-  const W = padL + barW + padR;
+  const { isAr } = useLang();
+  const tn = (val: string | number, decimals?: number) => formatArabicDigits(val, isAr, decimals !== undefined ? { decimals } : undefined);
 
   return (
-    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full" style={{ maxHeight: Math.min(totalH, 600) }}>
+    <div className="flex flex-col gap-3 w-full py-2">
       {items.map((item, i) => {
-        const y = i * (barH + gap) + 4;
-        const w = maxVal > 0 ? (item.value / maxVal) * barW : 0;
+        const pct = maxVal > 0 ? (item.value / maxVal) * 100 : 0;
         return (
-          <g key={i}>
-            <text x={padL - 8} y={y + barH / 2 + 3} textAnchor="end" style={{ fontSize: 10, fontWeight: 800 }} className="fill-slate-700">
-              {item.label.length > 22 ? item.label.slice(0, 22) + '…' : item.label}
-            </text>
-            <rect x={padL} y={y + 4} width={Math.max(0, w)} height={barH - 8} rx={6} fill={item.color} opacity={0.85} className="transition-all duration-500" />
-            <text x={padL + w + 8} y={y + barH / 2 + 3} style={{ fontSize: 10, fontWeight: 900 }} className="fill-slate-900">
-              {item.value.toFixed(2)} ★
-            </text>
-            {item.sub && (
-              <text x={padL + w + 52} y={y + barH / 2 + 3} style={{ fontSize: 8, fontWeight: 700 }} className="fill-slate-400">
-                {item.sub}
-              </text>
-            )}
-          </g>
+          <div key={i} className="flex items-center gap-3 text-xs w-full">
+            {/* Branch Label */}
+            <div className="w-[140px] sm:w-[180px] min-w-[140px] sm:min-w-[180px] truncate text-slate-700 font-bold text-end ltr:text-end rtl:text-start">
+              {item.label}
+            </div>
+            
+            {/* The Bar Container */}
+            <div className="flex-1 h-5 bg-slate-100 rounded-[6px] overflow-hidden relative">
+              <div 
+                className="h-full rounded-[6px] opacity-85 transition-all duration-500 flex items-center justify-end px-2"
+                style={{ 
+                  width: `${pct}%`, 
+                  backgroundColor: item.color 
+                }} 
+              />
+            </div>
+            
+            {/* Rating and reviews */}
+            <div className="w-[85px] sm:w-[100px] min-w-[85px] sm:min-w-[100px] flex items-center gap-1 text-slate-900 font-black ltr:text-start rtl:text-end justify-start rtl:justify-end">
+              <span>{tn(item.value, 2)} ★</span>
+              {item.sub && (
+                <span className="text-[10px] text-slate-400 font-bold">({tn(item.sub)})</span>
+              )}
+            </div>
+          </div>
         );
       })}
-    </svg>
+    </div>
   );
 }
 
+/** Stacked area chart for hourly popular times — overlays multiple brands */
 /** Stacked area chart for hourly popular times — overlays multiple brands */
 function HourlyOverlayChart({
   series,
@@ -1458,6 +2907,7 @@ function HourlyOverlayChart({
   series: { label: string; data: (number | null)[]; color: string }[];
   height?: number;
 }) {
+  const { isAr } = useLang();
   const W = 600, H = height, pad = { t: 16, r: 16, b: 36, l: 40 };
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
   const xStep = cw / 23;
@@ -1470,12 +2920,20 @@ function HourlyOverlayChart({
       {[0, 25, 50, 75, 100].map(v => (
         <g key={v}>
           <line x1={pad.l} y1={toY(v)} x2={W - pad.r} y2={toY(v)} stroke="#E2E8F0" strokeWidth={1} strokeDasharray={v === 0 ? undefined : '4,4'} />
-          <text x={pad.l - 6} y={toY(v) + 3} textAnchor="end" style={{ fontSize: 8, fontWeight: 700 }} className="fill-slate-400">{v}%</text>
+          <text 
+            x={isAr ? W - pad.r + 6 : pad.l - 6} 
+            y={toY(v) + 3} 
+            textAnchor={isAr ? "start" : "end"} 
+            style={{ fontSize: 8, fontWeight: 700, direction: 'ltr', unicodeBidi: 'bidi-override' }} 
+            className="fill-slate-400"
+          >
+            {v}%
+          </text>
         </g>
       ))}
       {/* X labels */}
       {[0, 3, 6, 9, 12, 15, 18, 21].map(h => (
-        <text key={h} x={toX(h)} y={H - 8} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800 }} className="fill-slate-400">{hourLabel(h)}</text>
+        <text key={h} x={toX(h)} y={H - 8} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800 }} className="fill-slate-400">{hourLabel(h, isAr)}</text>
       ))}
       {/* Lines */}
       {series.map((s, si) => {
@@ -1498,28 +2956,32 @@ function HourlyOverlayChart({
 // ── Popular Times Heatmap Component ──
 
 function PopularTimesHeatmap({ grid }: { grid: Record<string, (number | null)[]> }) {
+  const t = useT();
+  const { isAr } = useLang();
+  const tn = (val: string | number) => formatArabicDigits(val, isAr);
+
   return (
     <div className="overflow-x-auto">
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Popular Times Heatmap</p>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3"><BiInline en="Popular Times Heatmap" /></p>
       <div className="min-w-[640px]">
         <div className="grid gap-1" style={{ gridTemplateColumns: 'auto repeat(24, minmax(0,1fr))' }}>
           <div />
           {Array.from({ length: 24 }).map((_, h) => (
-            <div key={h} className="text-[8px] font-black text-slate-400 text-center">{hourLabel(h)}</div>
+            <div key={h} className="text-[8px] font-black text-slate-400 text-center">{hourLabel(h, isAr)}</div>
           ))}
           {DAYS.map(day => {
             const hourly = grid[day] || [];
             return (
               <React.Fragment key={day}>
-                <div className="text-[10px] font-black text-slate-500 uppercase pr-2 flex items-center">{DAY_LABELS[day]}</div>
+                <div className="text-[10px] font-black text-slate-500 uppercase pe-2 flex items-center">{t(DAY_LABELS[day])}</div>
                 {Array.from({ length: 24 }).map((_, h) => {
                   const v = hourly[h];
                   const alpha = v == null ? 0 : Math.max(0.05, v / 100);
                   return (
                     <div key={h}
-                         className="aspect-square rounded-[2px] transition-transform hover:scale-150 hover:z-10 cursor-help"
-                         style={{ backgroundColor: v == null ? '#F1F5F9' : `rgba(79, 70, 229, ${alpha})` }}
-                         title={v == null ? `${DAY_LABELS[day]} ${hourLabel(h)} — no data` : `${DAY_LABELS[day]} ${hourLabel(h)} — ${v}%`} />
+                      className="aspect-square rounded-[2px] transition-transform hover:scale-150 hover:z-10 cursor-default"
+                      style={{ backgroundColor: v == null ? '#F1F5F9' : `rgba(79, 70, 229, ${alpha})` }}
+                      title={v == null ? `${t(DAY_LABELS[day])} ${hourLabel(h, isAr)} — ${isAr ? 'لا توجد بيانات' : 'no data'}` : `${t(DAY_LABELS[day])} ${hourLabel(h, isAr)} — ${tn(`${v}%`)}`} />
                   );
                 })}
               </React.Fragment>
@@ -1527,9 +2989,9 @@ function PopularTimesHeatmap({ grid }: { grid: Record<string, (number | null)[]>
           })}
         </div>
         <div className="mt-3 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-          <span>Quiet</span>
+          <span><BiInline en="Quiet" /></span>
           <div className="h-1 flex-1 mx-4 bg-gradient-to-r from-slate-100 to-indigo-600 rounded-full" />
-          <span>Peak</span>
+          <span><BiInline en="Peak" /></span>
         </div>
       </div>
     </div>
@@ -1560,13 +3022,13 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
 function KPI({ label, value, sub, color, badge, labelColor }: { label: string; value: string; sub: string; color: string; badge?: string; labelColor?: string }) {
   const isEmerald = color === 'emerald';
   const isRose = color === 'rose';
-  
+
   return (
     <div className={`p-6 rounded-3xl bg-slate-900 border transition-all hover:scale-[1.02] duration-300 group
-      ${isEmerald ? 'border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 
-        isRose ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.1)]' : 
-        'border-slate-800 shadow-2xl hover:border-slate-700'}`}>
-      
+      ${isEmerald ? 'border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)]' :
+        isRose ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.1)]' :
+          'border-slate-800 shadow-2xl hover:border-slate-700'}`}>
+
       <div className="flex items-center gap-2 mb-3">
         <span className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: labelColor || '#94a3b8' }}>{label}</span>
         {badge && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-600 text-white rounded-md uppercase">{badge}</span>}
@@ -1588,7 +3050,7 @@ function KPI({ label, value, sub, color, badge, labelColor }: { label: string; v
 function BrandBadge({ brand, color }: { brand: string; color: string }) {
   return (
     <span className="text-sm font-black uppercase tracking-tight whitespace-nowrap"
-          style={{ color: color }}>
+      style={{ color: color }}>
       {brand}
     </span>
   );
@@ -1599,8 +3061,8 @@ function Seg({ n, t, c }: { n: number; t: number; c: string }) {
   if (pct === 0) return null;
   return (
     <div className="h-full first:rounded-l-lg last:rounded-r-lg transition-all duration-700"
-         style={{ width: `${pct}%`, backgroundColor: c }}
-         title={`${n} (${pct.toFixed(0)}%)`} />
+      style={{ width: `${pct}%`, backgroundColor: c }}
+      title={`${n} (${pct.toFixed(0)}%)`} />
   );
 }
 
@@ -1616,7 +3078,7 @@ function Mini({ label, value, unit }: { label: string; value: string; unit?: str
 }
 
 function TH({ children, clickable, onClick, align }: { children: React.ReactNode; clickable?: boolean; onClick?: () => void; align?: 'right' | 'center' }) {
-  const base = `px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : ''}`;
+  const base = `px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap ${align === 'right' ? 'text-end' : align === 'center' ? 'text-center' : 'text-start'}`;
   if (clickable) {
     return <th className={`${base} cursor-pointer hover:text-indigo-600 select-none`} onClick={onClick}>{children}</th>;
   }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { serverClient, adminClient } from '@/lib/supabase';
 import ConnectDbForm from './connect-form';
 import SchemaCopier from './schema/copier';
+import { Bi, BiInline } from '@/lib/bilingual';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,13 +35,11 @@ export default async function ConnectDbPage() {
         {/* Header */}
         <header className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100">
-            {isFirstTime ? 'One-time Setup' : 'Database Configuration'}
+            <BiInline en={isFirstTime ? 'One-time Setup' : 'Database Configuration'} />
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight font-display">
-            Connect your Supabase
-          </h1>
+          <Bi en="Connect your Supabase" as="h1" className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight font-display" />
           <p className="text-sm font-medium text-slate-500 max-w-xl mx-auto">
-            All your scraped data — branches, reviews, analytics — lives in <span className="font-bold text-slate-700">your own</span> Supabase project. We never store your business data.
+            <BiInline en="All your scraped data — branches, reviews, analytics — lives in your own Supabase project. We never store your business data." />
           </p>
         </header>
 
@@ -54,41 +53,41 @@ export default async function ConnectDbPage() {
                 </svg>
               </div>
               <div>
-                <p className="text-[11px] font-bold text-emerald-600 uppercase tracking-widest">Active Connection</p>
+                <p className="text-[11px] font-bold text-emerald-600 uppercase tracking-widest"><BiInline en="Active Connection" /></p>
                 <p className="text-sm font-bold text-slate-700 truncate max-w-[400px]">{existing.supabase_url}</p>
               </div>
             </div>
             <Link href="/dashboard" className="btn-secondary py-1.5 px-4 text-xs">
-              Go to Dashboard →
+              <BiInline en="Go to Dashboard →" />
             </Link>
           </div>
         )}
 
         {/* ──────── Step 1: Create Supabase project ──────── */}
-        <Step n={1} title="Create a Supabase project"
-          sub="Free tier is fine. Takes ~2 minutes to provision.">
+        <Step n={1} title={<BiInline en="Create a Supabase project" />}
+          sub={<BiInline en="Free tier is fine. Takes ~2 minutes to provision." />}>
           <div className="flex flex-wrap items-center gap-3">
             <a href="https://supabase.com/dashboard/new" target="_blank" rel="noopener"
               className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white font-bold text-sm rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition active:scale-95">
-              Open Supabase
+              <BiInline en="Open Supabase" />
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
             </a>
-            <span className="text-xs font-medium text-slate-500">Already have one? Skip to step 2.</span>
+            <span className="text-xs font-medium text-slate-500"><BiInline en="Already have one? Skip to step 2." /></span>
           </div>
         </Step>
 
         {/* ──────── Step 2: Run schema SQL ──────── */}
-        <Step n={2} title="Run the schema SQL"
-          sub="In your Supabase project: SQL Editor → New query → paste this → Run.">
+        <Step n={2} title={<BiInline en="Run the schema SQL" />}
+          sub={<BiInline en="In your Supabase project: SQL Editor → New query → paste this → Run." />}>
           <SchemaCopier sql={schemaSql} />
           <p className="text-[11px] font-medium text-slate-500 mt-3">
-            Safe to re-run — uses <code className="px-1 py-0.5 bg-slate-100 rounded text-[10px]">IF NOT EXISTS</code> everywhere.
+            <BiInline en="Safe to re-run — uses IF NOT EXISTS everywhere." />
           </p>
         </Step>
 
         {/* ──────── Step 3: Paste credentials ──────── */}
-        <Step n={3} title="Paste your project credentials"
-          sub={<>From Supabase: <span className="font-bold text-slate-700">Settings → API</span> — copy <span className="font-bold text-slate-700">Project URL</span> and <span className="font-bold text-slate-700">service_role</span> key.</>}>
+        <Step n={3} title={<BiInline en="Paste your project credentials" />}
+          sub={<BiInline en="From Supabase: Settings → API — copy Project URL and service_role key." />}>
           <ConnectDbForm existingUrl={existing?.supabase_url || ''} />
         </Step>
 
@@ -98,7 +97,7 @@ export default async function ConnectDbPage() {
 }
 
 function Step({ n, title, sub, children }: {
-  n: number; title: string; sub: React.ReactNode; children: React.ReactNode;
+  n: number; title: React.ReactNode; sub: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <section className="bg-white rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/30 overflow-hidden">

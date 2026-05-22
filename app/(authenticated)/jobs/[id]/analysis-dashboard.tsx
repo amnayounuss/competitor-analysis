@@ -35,6 +35,17 @@ interface BranchAnalytics {
   popular_times_grid: Record<string, (number|null)[]> | null;
   date_start: string | null;
   date_end: string | null;
+  branches?: {
+    stars: number;
+    reviews_count: number;
+  } | null;
+}
+
+function getBranchRating(a: BranchAnalytics): number {
+  if (a.branches && typeof a.branches === 'object' && a.branches.stars != null) {
+    return Number(a.branches.stars);
+  }
+  return a.avg_rating_period ?? 0;
 }
 
 interface Review {
@@ -106,8 +117,8 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
   const stats = useMemo(() => {
     const totalBranches = analytics.length;
     const totalReviews  = analytics.reduce((s, a) => s + a.total_reviews_period, 0);
-    const weightedAvg   = totalReviews > 0
-      ? analytics.reduce((s, a) => s + (a.avg_rating_period || 0) * a.total_reviews_period, 0) / totalReviews
+    const weightedAvg   = totalBranches > 0
+      ? analytics.reduce((s, a) => s + getBranchRating(a), 0) / totalBranches
       : 0;
     const branchesWithPT = analytics.filter(a => a.popular_times_grid).length;
     const cities = Array.from(new Set(analytics.map(a => a.city).filter(Boolean))) as string[];
@@ -131,9 +142,10 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
       const x = acc[a.brand];
       x.branchCount += 1;
       x.reviews     += a.total_reviews_period;
-      if (a.avg_rating_period != null) {
-        x.ratingSum += a.avg_rating_period * a.total_reviews_period;
-        x.ratingW   += a.total_reviews_period;
+      const branchRating = getBranchRating(a);
+      if (branchRating > 0) {
+        x.ratingSum += branchRating;
+        x.ratingW   += 1;
       }
       x.s5 += a.star_5_count; x.s4 += a.star_4_count;
       x.s3 += a.star_3_count; x.s2 += a.star_2_count; x.s1 += a.star_1_count;
@@ -160,9 +172,9 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
 
   const rankings = useMemo(() => {
     return [...analytics]
-      .filter(a => a.total_reviews_period > 0 && a.avg_rating_period != null)
+      .filter(a => getBranchRating(a) > 0)
       .sort((a, b) =>
-        (b.avg_rating_period! - a.avg_rating_period!) ||
+        (getBranchRating(b) - getBranchRating(a)) ||
         (b.total_reviews_period - a.total_reviews_period)
       );
   }, [analytics]);
@@ -406,7 +418,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                   <td className="py-3 font-black text-slate-900 text-xs">{a.branch_name}</td>
                   <td className="py-3 text-slate-500 text-xs uppercase tracking-tighter">{a.city || '—'}</td>
                   <td className="py-3 text-right">
-                    <span className="text-xs font-black text-slate-900">{a.avg_rating_period?.toFixed(2) ?? '—'} ★</span>
+                    <span className="text-xs font-black text-slate-900">{getBranchRating(a).toFixed(2)} ★</span>
                   </td>
                   <td className="py-3 text-right font-black text-slate-900 text-xs">{a.total_reviews_period}</td>
                 </tr>
@@ -466,7 +478,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                   </td>
                   <td className="px-2 py-3 text-slate-500 uppercase tracking-tight">{a.city || '—'}</td>
                   <td className="px-2 py-3 text-slate-600 text-[10px] font-bold">{a.peak_time || '—'}</td>
-                  <td className="px-2 py-3 text-right font-black text-slate-900">{a.avg_rating_period?.toFixed(2) ?? '—'}</td>
+                  <td className="px-2 py-3 text-right font-black text-slate-900">{getBranchRating(a).toFixed(2)}</td>
                   <td className="px-2 py-3 text-right font-black text-slate-900">{a.total_reviews_period}</td>
                   <td className="px-2 py-3 text-center text-[10px] font-bold text-slate-500">
                     {a.month_1_reviews}/{a.month_2_reviews}/{a.month_3_reviews}
@@ -500,7 +512,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
               <SectionHeader title={selected.branch_name}
                              sub={`Sheet 5 view · ${selected.brand}${selected.city ? ` · ${selected.city}` : ''}`} />
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                <Mini label="Avg Rating" value={selected.avg_rating_period?.toFixed(2) ?? '—'} unit="★" />
+                <Mini label="Avg Rating" value={getBranchRating(selected).toFixed(2)} unit="★" />
                 <Mini label="Reviews" value={selected.total_reviews_period.toString()} />
                 <Mini label="Peak Day" value={selected.peak_day || '—'} />
                 <Mini label="Peak Hour" value={selected.peak_hour || '—'}

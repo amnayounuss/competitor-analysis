@@ -2,6 +2,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { browserClient } from '@/lib/supabase';
 import Link from 'next/link';
+import { BiInline } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
 
 interface Notification {
   id: number; kind: string; title: string; body: string|null;
@@ -12,6 +14,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { isAr } = useLang();
 
   useEffect(() => {
     load();
@@ -42,6 +45,17 @@ export default function NotificationBell() {
     load();
   }
 
+  function display(text: string | null) {
+    if (!text) return '';
+    if (text.includes('|')) {
+      const parts = text.split('|');
+      if (parts.length === 2) {
+        return isAr ? parts[1].trim() : parts[0].trim();
+      }
+    }
+    return text;
+  }
+
   const unread = items.filter(n => !n.read_at).length;
 
   return (
@@ -66,15 +80,15 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-3 w-80 bg-white/80 backdrop-blur-xl border border-slate-100 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className={`absolute ${isAr ? 'left-0' : 'right-0'} top-full mt-3 w-80 bg-white/80 backdrop-blur-xl border border-slate-100 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200`} dir={isAr ? 'rtl' : 'ltr'}>
           <div className="flex items-center justify-between p-4 border-b border-slate-50/50 bg-white/50">
-            <span className="font-bold text-slate-900 text-sm tracking-tight">Intelligence Feed</span>
+            <span className="font-bold text-slate-900 text-sm tracking-tight"><BiInline en="Intelligence Feed" /></span>
             {unread > 0 && (
               <button 
                 onClick={markAllRead} 
                 className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-widest px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
               >
-                Clear all
+                <BiInline en="Clear all" />
               </button>
             )}
           </div>
@@ -84,7 +98,7 @@ export default function NotificationBell() {
                 <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
                   <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                 </div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Awaiting Events</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Awaiting Events" /></p>
               </div>
             ) : (
               items.slice(0, 20).map(n => (
@@ -101,9 +115,9 @@ export default function NotificationBell() {
                     }`}/>
                     <div className="min-w-0 flex-1">
                       <p className={`text-sm tracking-tight ${!n.read_at ? 'font-bold text-slate-900' : 'font-medium text-slate-600'}`}>
-                        {n.title}
+                        {display(n.title)}
                       </p>
-                      {n.body && <p className="text-xs text-slate-500 truncate mt-0.5 leading-relaxed">{n.body}</p>}
+                      {n.body && <p className="text-xs text-slate-500 truncate mt-0.5 leading-relaxed">{display(n.body)}</p>}
                       <p className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter mt-1.5">
                         {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {new Date(n.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                       </p>

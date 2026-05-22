@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { serverClient } from '@/lib/supabase';
 import SchedulesList from './schedules-list';
+import { Bi, BiInline } from '@/lib/bilingual';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,13 +16,13 @@ export default async function SchedulesPage() {
       <header className="flex items-end justify-between border-b border-slate-100 pb-8">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-bold uppercase tracking-widest border border-indigo-100 mb-2">
-            Automations
+            <BiInline en="Automations" />
           </div>
-          <h1 className="text-4xl font-bold text-slate-900 tracking-tight">Recurring Cycles</h1>
-          <p className="text-sm font-medium text-slate-500">Autonomous reports scheduled for the 1st of every month.</p>
+          <Bi en="Recurring Cycles" as="h1" className="text-4xl font-bold text-slate-900 tracking-tight" />
+          <Bi en="Autonomous reports scheduled for the 1st of every month." as="p" className="text-sm font-medium text-slate-500" />
         </div>
         <Link href="/dashboard" className="btn-secondary px-5 py-2.5 text-xs">
-          ← Return to Command
+          ← <BiInline en="Return to Command" />
         </Link>
       </header>
       <SchedulesList />

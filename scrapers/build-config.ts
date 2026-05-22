@@ -15,6 +15,7 @@ export interface JobConfig {
   jobId:           string;
   targetName:      string;
   workDir:         string;
+  searchLocation?: string;
   /** Lower-cased keywords → brand name. Used by analyzer to classify any
    *  scraped place whose `__searchBrand` was not set. First match wins, so
    *  order from most-specific to least-specific. */
@@ -104,6 +105,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
     jobId: args.jobId,
     targetName: cleanTarget,
     workDir,
+    searchLocation: location || undefined,
     BRAND_KEYWORDS: brandKeywords,
     TARGET_API: {
       clientId:     settings.gmb_oauth_client_id,

@@ -94,7 +94,8 @@ create table public.jobs (
   branches_total  int,
   reviews_total   int,
   excel_url       text,
-  report_url      text
+  report_url      text,
+  ai_summary      text
 );
 
 create index jobs_status_queued_at_idx on public.jobs (status, queued_at);

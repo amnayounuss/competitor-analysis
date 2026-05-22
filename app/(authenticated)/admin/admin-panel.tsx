@@ -36,7 +36,7 @@ export default function AdminPanel() {
         {([
           ['overview','Platform Overview'], 
           ['users','Clients'], 
-          ['gmail','Email Config'], 
+          ['gmail','Email Gateway'], 
           ['gmb','Business API'], 
           ['worker','System Runner']
         ] as const).map(([t, label]) => (

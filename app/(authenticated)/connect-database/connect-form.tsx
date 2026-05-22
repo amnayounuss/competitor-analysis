@@ -1,9 +1,13 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BiInline, useT } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
 
 export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) {
   const router = useRouter();
+  const t = useT();
+  const { isAr } = useLang();
   const [url, setUrl] = useState(existingUrl);
   const [key, setKey] = useState('');
   const [schemaConfirmed, setSchemaConfirmed] = useState(false);
@@ -32,11 +36,11 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
     });
     setSaving(false);
     const j = await r.json();
-    if (!r.ok) { setMsg('Save failed: ' + (j.error || 'unknown')); return; }
+    if (!r.ok) { setMsg(t('Save failed: ') + (j.error || 'unknown')); return; }
     
     // Use window.location.href to ensure a full refresh so middleware 
     // picks up the new 'last_test_ok' status immediately.
-    setMsg('Success! Redirecting...');
+    setMsg(t('Success! Redirecting...'));
     setTimeout(() => {
       window.location.href = '/dashboard';
     }, 800);
@@ -46,10 +50,10 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
   const canSave = test?.ok && test?.schemaReady && schemaConfirmed;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500" dir={isAr ? 'rtl' : 'ltr'}>
       <div className="space-y-6">
         <div className="space-y-1.5">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Supabase URL</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Supabase URL" /></label>
           <input 
             type="text" 
             value={url} 
@@ -60,7 +64,7 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
         </div>
 
         <div className="space-y-1.5">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Service Role Key</label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Service Role Key" /></label>
           <div className="relative group">
             <input 
               type="password" 
@@ -71,7 +75,7 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
             />
           </div>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-            Settings → API → <span className="text-indigo-500">"service_role"</span> (secret)
+            <BiInline en="Settings → API → 'service_role' (secret)" />
           </p>
         </div>
 
@@ -89,9 +93,9 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
             {schemaConfirmed && <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
           </div>
           <div>
-            <p className={`font-bold text-sm transition-colors ${schemaConfirmed ? 'text-indigo-900' : 'text-slate-700'}`}>Schema Verification</p>
+            <p className={`font-bold text-sm transition-colors ${schemaConfirmed ? 'text-indigo-900' : 'text-slate-700'}`}><BiInline en="Schema Verification" /></p>
             <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed">
-              I have executed the required SQL schema in my Supabase SQL editor to prepare the database.
+              <BiInline en="I have executed the required SQL schema in my Supabase SQL editor to prepare the database." />
             </p>
           </div>
         </div>
@@ -108,7 +112,7 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
           ) : (
             <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           )}
-          <span>{testing ? 'Verifying...' : 'Test Connection'}</span>
+          <span>{testing ? <BiInline en="Verifying..." /> : <BiInline en="Test Connection" />}</span>
         </button>
         
         <button 
@@ -121,7 +125,7 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
           ) : (
             <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
           )}
-          <span>{saving ? 'Initializing...' : 'Save & Continue'}</span>
+          <span>{saving ? <BiInline en="Initializing..." /> : <BiInline en="Save & Continue" />}</span>
         </button>
       </div>
 
@@ -146,10 +150,10 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
           </div>
           <div className="space-y-1">
             <p className="text-xs font-bold uppercase tracking-widest">
-              {test.ok && test.schemaReady ? 'Verification Successful' : test.ok ? 'Schema Error' : 'Connection Failed'}
+              {test.ok && test.schemaReady ? t('Verification Successful') : test.ok ? t('Schema Error') : t('Connection Failed')}
             </p>
             <p className="text-sm font-medium leading-relaxed opacity-90">
-              {test.ok && test.schemaReady && 'Connection established and database schema is ready for use.'}
+              {test.ok && test.schemaReady && t('Connection established and database schema is ready for use.')}
               {!test.schemaReady && test.error}
             </p>
           </div>
@@ -163,6 +167,5 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
         </div>
       )}
     </div>
-
   );
 }

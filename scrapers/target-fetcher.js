@@ -209,6 +209,17 @@ async function fetchTarget() {
       const mapsUrl = loc.metadata?.mapsUri || mapsUrlFromPlaceId(placeId);
       const phone   = loc.phoneNumbers?.primaryPhone || "";
 
+      // Scoping filter: If a specific search location is configured (e.g. "Riyadh"),
+      // skip GMB branches located in other cities/regions.
+      if (config.searchLocation) {
+        const searchLoc = config.searchLocation.toLowerCase();
+        const addrLower = address.toLowerCase();
+        const titleLower = title.toLowerCase();
+        if (!addrLower.includes(searchLoc) && !titleLower.includes(searchLoc)) {
+          continue; // Skip branch outside target region
+        }
+      }
+
       // Reviews — tries the v4 API; silently empty if scope/permission missing
       let reviews = [];
       try {

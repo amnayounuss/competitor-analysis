@@ -9,6 +9,7 @@ module.exports = {
       fontFamily: {
         sans: ['var(--font-sans)'],
         heading: ['var(--font-display)'],
+        arabic: ['var(--font-arabic)', 'system-ui', 'sans-serif'],
       },
     },
   },

@@ -3,10 +3,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { browserClient } from '@/lib/supabase';
 import Link from 'next/link';
+import { Bi, BiInline, useT } from '@/lib/bilingual';
+import { useLang } from '@/lib/lang-context';
+import LangToggle from '@/components/lang-toggle';
 
 export default function LoginPage() {
   const sb = browserClient();
   const router = useRouter();
+  const t = useT();
+  const { isAr } = useLang();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -40,7 +45,11 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+    <main className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden" dir={isAr ? 'rtl' : 'ltr'}>
+      {/* Language Toggle - Top */}
+      <div className="absolute top-4 md:top-6 z-20" style={{ [isAr ? 'left' : 'right']: '1.5rem' }}>
+        <LangToggle />
+      </div>
       {/* Decorative background elements */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-100/30 rounded-full blur-[120px]" />
@@ -54,8 +63,8 @@ export default function LoginPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight text-slate-900">Welcome Back</h1>
-          <p className="text-slate-500 mt-2 font-medium">Continue to your analysis dashboard</p>
+          <Bi en="Welcome Back" as="h1" className="text-4xl font-bold tracking-tight text-slate-900" />
+          <Bi en="Continue to your analysis dashboard" as="p" className="text-slate-500 mt-2 font-medium" />
         </div>
 
         <form onSubmit={onSubmit} className="modern-card p-10 space-y-6">
@@ -67,28 +76,28 @@ export default function LoginPage() {
           )}
 
           <div className="space-y-2">
-            <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">Email address</label>
+            <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Email address" /></label>
             <input 
               type="email" 
               required 
               value={email} 
               onChange={e => setEmail(e.target.value)}
-              placeholder="name@company.com"
+              placeholder={t('name@company.com')}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
             />
           </div>
 
           <div className="space-y-2">
             <div className="flex justify-between items-center px-1">
-              <label className="block text-sm font-bold text-slate-700 tracking-tight">Password</label>
-              <button type="button" className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors">Forgot?</button>
+              <label className="block text-sm font-bold text-slate-700 tracking-tight"><BiInline en="Password" /></label>
+              <button type="button" className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors"><BiInline en="Forgot?" /></button>
             </div>
             <input 
               type="password" 
               required 
               value={password} 
               onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder={t('••••••••')}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" 
             />
           </div>
@@ -101,20 +110,21 @@ export default function LoginPage() {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Authenticating...
+                <BiInline en="Authenticating..." />
               </span>
-            ) : 'Sign in to Account'}
+            ) : <BiInline en="Sign in to Account" />}
           </button>
 
           <div className="pt-4 text-center">
             <p className="text-sm text-slate-500 font-medium">
-              Don't have an account? <Link href="/signup" className="text-indigo-600 font-bold hover:underline">Create one for free</Link>
+              <BiInline en="Don't have an account?" />{' '}
+              <Link href="/signup" className="text-indigo-600 font-bold hover:underline"><BiInline en="Create one for free" /></Link>
             </p>
           </div>
         </form>
 
         <p className="mt-8 text-center text-xs text-slate-400 font-medium tracking-wide uppercase">
-          &copy; 2026 Reviews Analytics &bull; Secure Connection
+          &copy; 2026 <BiInline en="Reviews Analytics" /> &bull; <BiInline en="Secure Connection" />
         </p>
       </div>
     </main>

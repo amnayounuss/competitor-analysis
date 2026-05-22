@@ -71,7 +71,5 @@ export function clearSettingsCache() {
 export async function isSetupCompleted(): Promise<boolean> {
   const s = await getSettings();
   return s.setup_completed
-    && !!s.smtp_host
-    && !!s.smtp_user
     && !!s.gmb_oauth_client_id;
 }
