@@ -63,17 +63,24 @@ export default async function DashboardOverview() {
         return true;
       });
 
-      // Filter existing branches by search_location on-the-fly to scope them strictly to the target city
+      const COUNTRY_TO_CODE: Record<string, string> = {
+        'saudi arabia': 'sa', 'united arab emirates': 'ae', 'uae': 'ae',
+        'bahrain': 'bh', 'kuwait': 'kw', 'qatar': 'qa', 'oman': 'om',
+        'egypt': 'eg', 'jordan': 'jo', 'lebanon': 'lb', 'iraq': 'iq',
+        'turkey': 'tr', 'pakistan': 'pk', 'india': 'in',
+      };
       const filteredAnalytics = aggregatedAnalytics.filter(a => {
         const jobRecord = allSucceededJobs.find(j => j.id === a.job_id);
         const searchLoc = jobRecord?.search_location ? jobRecord.search_location.trim().toLowerCase() : '';
-        if (!searchLoc) return true; // Keep all if no search location specified
+        if (!searchLoc) return true;
 
         const addr = (a.address || '').toLowerCase();
         const city = (a.city || '').toLowerCase();
         const title = (a.branch_name || '').toLowerCase();
+        const countryCode = COUNTRY_TO_CODE[searchLoc];
+        const countryMatch = countryCode && (addr.endsWith(`, ${countryCode}`) || addr.endsWith(` ${countryCode}`));
 
-        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc);
+        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc) || countryMatch;
       });
 
       // Extract all distinct competitor brands across all jobs

@@ -55,16 +55,24 @@ export default async function JobPage({ params }: { params: { id: string } }) {
         cdb.from('analyses').select('*').eq('job_id', job.id),
       ]);
 
+      const COUNTRY_TO_CODE: Record<string, string> = {
+        'saudi arabia': 'sa', 'united arab emirates': 'ae', 'uae': 'ae',
+        'bahrain': 'bh', 'kuwait': 'kw', 'qatar': 'qa', 'oman': 'om',
+        'egypt': 'eg', 'jordan': 'jo', 'lebanon': 'lb', 'iraq': 'iq',
+        'turkey': 'tr', 'pakistan': 'pk', 'india': 'in',
+      };
       const searchLoc = job.search_location ? job.search_location.trim().toLowerCase() : '';
       const rawAnalytics = analyticsRes.data || [];
       const filteredAnalytics = rawAnalytics.filter(a => {
-        if (!searchLoc) return true; // Keep all if no search location specified
+        if (!searchLoc) return true;
 
         const addr = (a.address || '').toLowerCase();
         const city = (a.city || '').toLowerCase();
         const title = (a.branch_name || '').toLowerCase();
+        const countryCode = COUNTRY_TO_CODE[searchLoc];
+        const countryMatch = countryCode && (addr.endsWith(`, ${countryCode}`) || addr.endsWith(` ${countryCode}`));
 
-        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc);
+        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc) || countryMatch;
       });
 
       dashboardData = {

@@ -22,7 +22,7 @@ export async function parseAddressesWithClaude(
     throw new Error('Anthropic API key is not configured in environment variables');
   }
 
-  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest';
+  const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
 
   const systemPrompt = `You are a professional business data analyst. You are given a list of branch locations with their business name (title) and free-text address.
 Your goal is to:

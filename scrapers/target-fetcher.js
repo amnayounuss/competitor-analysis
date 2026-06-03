@@ -152,6 +152,17 @@ async function listReviewsForLocation(token, accountName, locationName) {
   return all;
 }
 
+// ─────────────── country name → ISO code map ───────────────
+
+const COUNTRY_TO_CODE = {
+  'saudi arabia': 'SA', 'united arab emirates': 'AE', 'uae': 'AE',
+  'bahrain': 'BH', 'kuwait': 'KW', 'qatar': 'QA', 'oman': 'OM',
+  'egypt': 'EG', 'jordan': 'JO', 'lebanon': 'LB', 'iraq': 'IQ',
+  'turkey': 'TR', 'pakistan': 'PK', 'india': 'IN', 'morocco': 'MA',
+  'tunisia': 'TN', 'syria': 'SY', 'yemen': 'YE', 'libya': 'LY',
+  'sudan': 'SD', 'palestine': 'PS', 'iran': 'IR',
+};
+
 // ─────────────── shape converters ───────────────
 
 function formatAddress(sf) {
@@ -209,14 +220,15 @@ async function fetchTarget() {
       const mapsUrl = loc.metadata?.mapsUri || mapsUrlFromPlaceId(placeId);
       const phone   = loc.phoneNumbers?.primaryPhone || "";
 
-      // Scoping filter: If a specific search location is configured (e.g. "Riyadh"),
-      // skip GMB branches located in other cities/regions.
       if (config.searchLocation) {
-        const searchLoc = config.searchLocation.toLowerCase();
+        const searchLoc = config.searchLocation.toLowerCase().trim();
         const addrLower = address.toLowerCase();
         const titleLower = title.toLowerCase();
-        if (!addrLower.includes(searchLoc) && !titleLower.includes(searchLoc)) {
-          continue; // Skip branch outside target region
+        const regionCode = (loc.storefrontAddress?.regionCode || '').toUpperCase();
+        const expectedCode = COUNTRY_TO_CODE[searchLoc];
+        const countryMatch = expectedCode && regionCode === expectedCode;
+        if (!addrLower.includes(searchLoc) && !titleLower.includes(searchLoc) && !countryMatch) {
+          continue;
         }
       }
 
