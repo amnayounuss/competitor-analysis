@@ -54,7 +54,7 @@ Address: "${b.address}"`
     },
     body: JSON.stringify({
       model: model,
-      max_tokens: 4000,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
     }),
