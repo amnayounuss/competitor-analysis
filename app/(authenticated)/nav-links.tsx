@@ -12,14 +12,14 @@ interface NavLinkProps {
   labelAr: string;
 }
 
-export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
+export default function NavLinks({ role }: { role: 'admin' | 'client' | 'viewer' }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentTab = searchParams.get('tab') || 'overview';
   const { lang } = useLang();
   const t = useT();
 
-  if (isAdmin) {
+  if (role === 'admin') {
     return (
       <nav className="space-y-1.5">
         <NavItem href="/admin?tab=overview" icon={<LayoutIcon />} label="Platform Overview" labelAr={t('Platform Overview')} active={pathname === '/admin' && currentTab === 'overview'} />
@@ -31,12 +31,22 @@ export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
+  if (role === 'viewer') {
+    return (
+      <nav className="space-y-1.5">
+        <NavItem href="/dashboard" icon={<LayoutIcon />} label="Overview" labelAr={t('Overview')} active={pathname === '/dashboard'} />
+        <NavItem href="/dashboard/jobs" icon={<ListIcon />} label="Analysis History" labelAr={t('Analysis History')} active={pathname.startsWith('/dashboard/jobs') || pathname.startsWith('/jobs')} />
+      </nav>
+    );
+  }
+
   return (
     <nav className="space-y-1.5">
       <NavItem href="/dashboard" icon={<LayoutIcon />} label="Overview" labelAr={t('Overview')} active={pathname === '/dashboard'} />
       <NavItem href="/dashboard/new" icon={<PlusIcon />} label="New Analysis" labelAr={t('New Analysis')} active={pathname === '/dashboard/new'} />
       <NavItem href="/dashboard/jobs" icon={<ListIcon />} label="Analysis History" labelAr={t('Analysis History')} active={pathname.startsWith('/dashboard/jobs') || pathname.startsWith('/jobs')} />
       <NavItem href="/schedules" icon={<ClockIcon />} label="Schedules" labelAr={t('Schedules')} active={pathname === '/schedules'} />
+      <NavItem href="/dashboard/team" icon={<UsersIcon />} label="Team" labelAr={t('Team')} active={pathname === '/dashboard/team'} />
     </nav>
   );
 }

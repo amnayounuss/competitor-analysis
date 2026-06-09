@@ -32,8 +32,14 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  // Require connected client DB
   const admin = adminClient();
+
+  const { data: profile } = await admin.from('profiles').select('role, is_admin, parent_user_id').eq('id', user.id).maybeSingle();
+  if (profile?.role === 'viewer') {
+    return NextResponse.json({ error: 'Viewers cannot submit analyses.' }, { status: 403 });
+  }
+
+  // Require connected client DB
   const { data: conn } = await admin.from('client_databases')
     .select('last_test_ok').eq('user_id', user.id).maybeSingle();
   if (!conn?.last_test_ok) {
@@ -67,8 +73,13 @@ export async function GET() {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  const { data: jobs } = await sb.from('jobs')
+  const admin = adminClient();
+  const { data: profile } = await admin.from('profiles').select('role, parent_user_id, is_admin').eq('id', user.id).maybeSingle();
+  const jobsUserId = profile?.role === 'viewer' && profile.parent_user_id ? profile.parent_user_id : user.id;
+
+  const { data: jobs } = await admin.from('jobs')
     .select('id, target_name, competitors, status, progress_pct, current_stage, queued_at, started_at, finished_at, branches_total, reviews_total, kind, excel_url')
+    .eq('user_id', jobsUserId)
     .order('queued_at', { ascending: false }).limit(50);
   return NextResponse.json({ jobs });
 }

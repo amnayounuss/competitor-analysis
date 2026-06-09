@@ -5,8 +5,8 @@ async function requireAdmin() {
   const sb = serverClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { error: 'unauthorized', status: 401 as const };
-  const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
-  if (!profile?.is_admin) return { error: 'forbidden', status: 403 as const };
+  const { data: profile } = await sb.from('profiles').select('role, is_admin').eq('id', user.id).single();
+  if (profile?.role !== 'admin' && !profile?.is_admin) return { error: 'forbidden', status: 403 as const };
   return { user };
 }
 
@@ -24,7 +24,7 @@ export async function GET() {
     { data: allJobs },
     { data: recentErrors }
   ] = await Promise.all([
-    sb.from('profiles').select('*', { count: 'exact', head: true }).eq('is_admin', false),
+    sb.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client'),
     sb.from('client_databases').select('*', { count: 'exact', head: true }).eq('last_test_ok', true),
     sb.from('schedules').select('*', { count: 'exact', head: true }).eq('enabled', true),
     sb.from('jobs').select('status, branches_total, reviews_total, finished_at, target_name, user_id, queued_at'),

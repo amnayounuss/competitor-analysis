@@ -62,9 +62,12 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const admin = adminClient();
+  const { data: profile } = await admin.from('profiles').select('role, parent_user_id, is_admin').eq('id', user.id).maybeSingle();
+  const dbUserId = profile?.role === 'viewer' && profile.parent_user_id ? profile.parent_user_id : user.id;
+
   const { data } = await admin.from('client_databases')
     .select('supabase_url, last_test_ok, last_test_at, last_test_error, updated_at')
-    .eq('user_id', user.id).maybeSingle();
+    .eq('user_id', dbUserId).maybeSingle();
 
   return NextResponse.json({ connection: data || null });
 }

@@ -7,14 +7,14 @@ import LangToggle from '@/components/lang-toggle';
 import { BiInline } from '@/lib/bilingual';
 
 export default function AuthShell({
-  isAdmin,
+  role,
   email,
   navLinks,
   notificationBell,
   signOutButton,
   children,
 }: {
-  isAdmin: boolean;
+  role: 'admin' | 'client' | 'viewer';
   email: string;
   navLinks: React.ReactNode;
   notificationBell: React.ReactNode;
@@ -109,7 +109,7 @@ export default function AuthShell({
               </svg>
             </button>
             <h2 className={`text-base md:text-lg font-black text-slate-900 tracking-tight ${isAr ? 'font-arabic' : ''}`}>
-              <BiInline en={isAdmin ? 'Admin Command Center' : 'Client Workspace'} />
+              <BiInline en={role === 'admin' ? 'Admin Command Center' : role === 'viewer' ? 'Dashboard' : 'Client Workspace'} />
             </h2>
           </div>
           <div className="flex items-center gap-2 md:gap-4">

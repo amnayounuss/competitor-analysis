@@ -1,4 +1,5 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 
 const PROTECTED = ['/dashboard', '/jobs', '/admin', '/schedules', '/connect-database'];
@@ -53,17 +54,27 @@ export async function middleware(req: NextRequest) {
 
   if (needsAuth && !user) return NextResponse.redirect(new URL('/login', req.url));
 
-  // ── Client DB connection gate (Optimized: direct DB query) ──
+  // ── Role + DB connection gate ──
   if (user && (path.startsWith('/dashboard') || path.startsWith('/jobs') || path.startsWith('/schedules'))) {
-    // Check if user is admin (exempt from forced DB setup)
-    // We can use a single query to get both profile and connection status
-    const [{ data: profile }, { data: conn }] = await Promise.all([
-      sb.from('profiles').select('is_admin').eq('id', user.id).maybeSingle(),
-      sb.from('client_databases').select('last_test_ok').eq('user_id', user.id).maybeSingle()
-    ]);
+    const { data: profile } = await sb.from('profiles').select('role, parent_user_id, is_admin').eq('id', user.id).maybeSingle();
+    const role = profile?.role === 'viewer' ? 'viewer' : profile?.role === 'admin' || profile?.is_admin ? 'admin' : 'client';
 
-    if (profile?.is_admin) return res;
+    if (role === 'admin') return res;
 
+    if (role === 'viewer') {
+      if (path === '/dashboard/new' || path.startsWith('/schedules') || path === '/dashboard/team' || path === '/connect-database') {
+        return NextResponse.redirect(new URL('/dashboard', req.url));
+      }
+      const dbUserId = profile?.parent_user_id || user.id;
+      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+      const { data: conn } = await admin.from('client_databases').select('last_test_ok').eq('user_id', dbUserId).maybeSingle();
+      if (!conn?.last_test_ok) {
+        return NextResponse.redirect(new URL('/login', req.url));
+      }
+      return res;
+    }
+
+    const { data: conn } = await sb.from('client_databases').select('last_test_ok').eq('user_id', user.id).maybeSingle();
     if (!conn?.last_test_ok) {
       return NextResponse.redirect(new URL('/connect-database', req.url));
     }

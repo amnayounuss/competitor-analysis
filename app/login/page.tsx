@@ -30,10 +30,11 @@ export default function LoginPage() {
 
     const { data: { user } } = await sb.auth.getUser();
     if (user) {
-      const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
-      if (profile?.is_admin) { router.push('/admin'); return; }
+      const { data: profile } = await sb.from('profiles').select('role, is_admin').eq('id', user.id).single();
+      const role = profile?.role === 'viewer' ? 'viewer' : profile?.role === 'admin' || profile?.is_admin ? 'admin' : 'client';
+      if (role === 'admin') { router.push('/admin'); return; }
+      if (role === 'viewer') { router.push('/dashboard'); return; }
 
-      // First-time clients: send straight to DB setup screen
       const r = await fetch('/api/client-db', { cache: 'no-store' });
       const j = r.ok ? await r.json() : null;
       if (!j?.connection?.last_test_ok) {

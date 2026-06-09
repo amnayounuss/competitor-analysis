@@ -15,11 +15,14 @@ export default async function JobPage({ params }: { params: { id: string } }) {
   if (!user) redirect('/login');
 
   const admin = adminClient();
+  const { data: profile } = await admin.from('profiles').select('role, parent_user_id, is_admin').eq('id', user.id).maybeSingle();
+  const effectiveUserId = profile?.role === 'viewer' && profile.parent_user_id ? profile.parent_user_id : user.id;
+
   const { data: job } = await admin
     .from('jobs')
     .select('*')
     .eq('id', params.id)
-    .eq('user_id', user.id)
+    .eq('user_id', effectiveUserId)
     .single();
 
   if (!job) notFound();
@@ -39,14 +42,13 @@ export default async function JobPage({ params }: { params: { id: string } }) {
 
   if (job.status === 'succeeded') {
     try {
-      const creds = await getClientDbCreds(user.id);
+      const creds = await getClientDbCreds(effectiveUserId);
       const cdb = clientDbClient(creds);
 
-      // Fetch all succeeded jobs for the switcher
       const { data: allSucceededJobs } = await admin
         .from('jobs')
         .select('id, target_name, competitors, date_start, date_end, finished_at, search_location')
-        .eq('user_id', user.id)
+        .eq('user_id', effectiveUserId)
         .eq('status', 'succeeded')
         .order('finished_at', { ascending: false });
 

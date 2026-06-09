@@ -10,8 +10,8 @@ export default async function AdminPage() {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
-  if (!profile?.is_admin) redirect('/dashboard');
+  const { data: profile } = await sb.from('profiles').select('role, is_admin').eq('id', user.id).single();
+  if (profile?.role !== 'admin' && !profile?.is_admin) redirect('/dashboard');
 
   return (
     <main className="max-w-6xl mx-auto p-8 space-y-10">

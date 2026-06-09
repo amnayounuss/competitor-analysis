@@ -7,8 +7,8 @@ async function requireAdmin() {
   const sb = serverClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { error: 'unauthorized', status: 401 as const };
-  const { data: profile } = await sb.from('profiles').select('is_admin').eq('id', user.id).single();
-  if (!profile?.is_admin) return { error: 'forbidden', status: 403 as const };
+  const { data: profile } = await sb.from('profiles').select('role, is_admin').eq('id', user.id).single();
+  if (profile?.role !== 'admin' && !profile?.is_admin) return { error: 'forbidden', status: 403 as const };
   return { user };
 }
 

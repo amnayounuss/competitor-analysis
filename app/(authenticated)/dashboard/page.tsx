@@ -12,20 +12,22 @@ export default async function DashboardOverview() {
   if (!user) return null;
 
   const admin = adminClient();
+  const { data: profile } = await admin.from('profiles').select('role, parent_user_id, is_admin').eq('id', user.id).maybeSingle();
+  const effectiveUserId = profile?.role === 'viewer' && profile.parent_user_id ? profile.parent_user_id : user.id;
+
   const { data: latestJob } = await admin
     .from('jobs')
     .select('*')
-    .eq('user_id', user.id)
+    .eq('user_id', effectiveUserId)
     .eq('status', 'succeeded')
     .order('finished_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  // Fetch all succeeded jobs for the switcher
   const { data: allSucceededJobs } = await admin
     .from('jobs')
     .select('*')
-    .eq('user_id', user.id)
+    .eq('user_id', effectiveUserId)
     .eq('status', 'succeeded')
     .order('finished_at', { ascending: false });
 
@@ -37,7 +39,7 @@ export default async function DashboardOverview() {
   let dbConnected = false;
 
   try {
-    const creds = await getClientDbCreds(user.id);
+    const creds = await getClientDbCreds(effectiveUserId);
     const cdb = clientDbClient(creds);
     dbConnected = true;
 
