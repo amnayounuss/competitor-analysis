@@ -88,18 +88,31 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
     throw new Error('GMB OAuth not configured. Admin must set GMB client_id and secret in /admin.');
   }
 
-  // Clean brand names: strip location words if user accidentally included them
-  // e.g. "Bostani Saudi Arabia" with location "Saudi Arabia" → "Bostani"
   const cleanTarget = stripLocation(args.targetName);
-  const cleanComps  = args.competitors.map(c => stripLocation(c));
 
-  // Brand vocabulary used by analyzer to classify scraped places.
-  // Target first (so it matches before competitors when titles overlap),
-  // then competitors in submission order.
+  // Parse competitor aliases: "Tawa|تاوة|حلويات تاوة" → brand="Tawa", aliases=["Tawa","تاوة","حلويات تاوة"]
+  const parsedComps = args.competitors.map(raw => {
+    const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+    const brand = stripLocation(parts[0]);
+    const aliases = parts.length > 1 ? parts.map(p => stripLocation(p)) : [brand];
+    return { brand, aliases };
+  });
+
   const brandKeywords: BrandKeyword[] = [
     { keyword: cleanTarget.toLowerCase(), brand: cleanTarget },
-    ...cleanComps.map(c => ({ keyword: c.toLowerCase(), brand: c })),
   ];
+  const competitorEntries: CompetitorEntry[] = [];
+
+  for (const comp of parsedComps) {
+    for (const alias of comp.aliases) {
+      brandKeywords.push({ keyword: alias.toLowerCase(), brand: comp.brand });
+      competitorEntries.push({
+        key:  comp.brand,
+        name: alias,
+        url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(alias))}/?hl=en`,
+      });
+    }
+  }
 
   return {
     jobId: args.jobId,
@@ -110,7 +123,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
     TARGET_API: {
       clientId:     settings.gmb_oauth_client_id,
       clientSecret: settings.gmb_oauth_client_secret,
-      refreshToken: args.refreshToken,                   // client provides this
+      refreshToken: args.refreshToken,
       readMask:     'name,title,storeCode,storefrontAddress,regularHours,phoneNumbers,websiteUri,metadata',
     },
     TARGET_SEARCH: {
@@ -118,11 +131,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       name: cleanTarget,
       url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(cleanTarget))}/?hl=en`,
     },
-    COMPETITORS: cleanComps.map(name => ({
-      key:  name,
-      name,
-      url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(name))}/?hl=en`,
-    })),
+    COMPETITORS: competitorEntries,
     REVIEWS_OPTIONS: { maxReviews: 100 },
     LOOKBACK_MONTHS: 3,
     DATE_START:      args.dateStart,

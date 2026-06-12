@@ -86,7 +86,7 @@ async function discoverBranchesForBrand(browser, brand) {
   const page = await browser.newPage();
   await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
 
-  console.log(`\n[stage1:${brand.key}] opening ${brand.url}`);
+  console.log(`\n[stage1:${brand.key}] searching "${brand.name}" → ${brand.url}`);
   await page.goto(brand.url, { waitUntil: "networkidle2", timeout: 60000 });
   await sleep(3000);
   await dismissConsent(page);
@@ -94,7 +94,7 @@ async function discoverBranchesForBrand(browser, brand) {
   try {
     await page.waitForSelector('div[role="feed"]', { timeout: 15000 });
   } catch {
-    console.warn(`[stage1:${brand.key}] no results feed — skipping`);
+    console.warn(`[stage1:${brand.key}] no results feed for "${brand.name}" — 0 results`);
     await page.close();
     return [];
   }
@@ -104,16 +104,30 @@ async function discoverBranchesForBrand(browser, brand) {
 
   const branches = await extractBranchesFromPage(page);
   await page.close();
+  console.log(`[stage1:${brand.key}] Google returned ${branches.length} results for "${brand.name}"`);
 
-  // Build keywords from brand name — filter out very short words (≤2 chars)
-  // and common location words that would cause false positives.
   const LOCATION_NOISE = new Set([
     "saudi", "arabia", "riyadh", "jeddah", "dubai", "uae", "kuwait",
     "bahrain", "qatar", "oman", "egypt", "jordan", "lebanon", "india",
     "pakistan", "london", "new", "york", "city", "state", "kingdom",
   ]);
-  const nameWords = brand.name.toLowerCase().split(/\s+/)
-    .filter((w) => w.length > 2 && !LOCATION_NOISE.has(w));
+
+  // Collect keywords from ALL aliases of this brand (via BRAND_KEYWORDS)
+  const allKeywords = new Set();
+  if (config.BRAND_KEYWORDS) {
+    for (const bk of config.BRAND_KEYWORDS) {
+      if (bk.brand === brand.key) {
+        for (const w of bk.keyword.split(/\s+/)) {
+          if (w.length > 2 && !LOCATION_NOISE.has(w)) allKeywords.add(w);
+        }
+      }
+    }
+  }
+  // Also add words from this specific search name
+  for (const w of brand.name.toLowerCase().split(/\s+/)) {
+    if (w.length > 2 && !LOCATION_NOISE.has(w)) allKeywords.add(w);
+  }
+  const nameWords = Array.from(allKeywords);
 
   const filtered = branches
     .filter((b) => {
@@ -127,29 +141,45 @@ async function discoverBranchesForBrand(browser, brand) {
     return filtered;
   }
 
-  // Fallback: strict filter returned 0 — common when Google Maps titles are
-  // in Arabic or a different script. The search URL was already brand-specific,
-  // so accept all discovered branches and tag them with this brand.
-  console.warn(`[stage1:${brand.key}] ${branches.length} raw → 0 strict match (keywords: ${nameWords.join(", ") || "(none after filtering)"}) — accepting ALL ${branches.length} results as fallback (titles may be in non-Latin script)`);
+  console.warn(`[stage1:${brand.key}] ${branches.length} raw → 0 strict match (keywords: ${nameWords.join(", ") || "(none)"}) — accepting ALL ${branches.length} as fallback`);
   return branches.map((b) => ({ ...b, __searchBrand: brand.key }));
 }
 
 async function discoverBranches(browser) {
   console.log("\n═══ STAGE 1: Discovering competitor branches ═══");
-  const all = [];
-  for (const brand of config.COMPETITORS) {
-    try { all.push(...(await discoverBranchesForBrand(browser, brand))); }
-    catch (err) { console.error(`[stage1:${brand.key}] FAILED: ${err.message}`); }
+
+  // Group searches by brand to show per-alias stats
+  const brandAliases = {};
+  for (const c of config.COMPETITORS) {
+    brandAliases[c.key] = brandAliases[c.key] || [];
+    brandAliases[c.key].push(c.name);
   }
+  for (const [brand, aliases] of Object.entries(brandAliases)) {
+    console.log(`[stage1] ${brand}: ${aliases.length} search queries → ${aliases.join(", ")}`);
+  }
+
+  const all = [];
+  let totalRaw = 0;
+  for (const brand of config.COMPETITORS) {
+    try {
+      const found = await discoverBranchesForBrand(browser, brand);
+      totalRaw += found.length;
+      all.push(...found);
+    } catch (err) { console.error(`[stage1:${brand.key}] FAILED: ${err.message}`); }
+  }
+
   const seen = new Set();
   const deduped = [];
+  let dupeCount = 0;
   for (const b of all) {
     const key = b.url.split("?")[0];
-    if (!seen.has(key)) { seen.add(key); deduped.push(b); }
+    if (!seen.has(key)) { seen.add(key); deduped.push(b); } else { dupeCount++; }
   }
+
   const byBrand = {};
   for (const b of deduped) byBrand[b.__searchBrand] = (byBrand[b.__searchBrand] || 0) + 1;
-  console.log(`\n[stage1] total unique competitor branches: ${deduped.length}`);
+  console.log(`\n[stage1] ── Discovery Summary ──`);
+  console.log(`[stage1] total searches: ${config.COMPETITORS.length} | raw results: ${totalRaw} | duplicates removed: ${dupeCount} | unique branches: ${deduped.length}`);
   for (const [k, v] of Object.entries(byBrand)) console.log(`          ${k}: ${v} branches`);
   return deduped;
 }
@@ -431,12 +461,20 @@ async function scrapeBranches(browser, branches) {
     await sleep(config.PUPPETEER_OPTIONS.betweenBranchesMs);
   }
 
-  // Return ONLY the branches that were requested in this call.
-  // This keeps target-fallback and competitor calls from cross-contaminating
-  // each other's result sets even though they share the on-disk cache.
-  return Array.from(cachedByUrl.entries())
+  const results = Array.from(cachedByUrl.entries())
     .filter(([k]) => requestedUrls.has(k))
     .map(([, v]) => v);
+
+  const totalReviews = results.reduce((s, b) => s + (b.reviews?.length || 0), 0);
+  const withAddr = results.filter(b => b.address).length;
+  const withHours = results.filter(b => b.hours).length;
+  const byBrand = {};
+  for (const b of results) byBrand[b.__searchBrand] = (byBrand[b.__searchBrand] || 0) + 1;
+  console.log(`\n[stage2] ── Scrape Summary ──`);
+  console.log(`[stage2] branches: ${results.length} | reviews: ${totalReviews} | with address: ${withAddr} | with hours: ${withHours}`);
+  for (const [k, v] of Object.entries(byBrand)) console.log(`          ${k}: ${v} branches`);
+
+  return results;
 }
 
 // ─────────────── public entry point ───────────────
