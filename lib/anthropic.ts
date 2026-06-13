@@ -15,11 +15,12 @@ export interface AIBranchNameResult {
  * extract clean unique street/district branch names, and normalize city names.
  */
 export async function parseAddressesWithClaude(
-  branches: Array<{ title: string; address: string }>
+  branches: Array<{ title: string; address: string }>,
+  apiKeyOverride?: string
 ): Promise<AIBranchNameResult[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = apiKeyOverride || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new Error('Anthropic API key is not configured in environment variables');
+    throw new Error('Anthropic API key is not configured. Set it in Admin → Business API settings.');
   }
 
   const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';

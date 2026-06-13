@@ -19,6 +19,9 @@ export interface AppSettings {
   gmb_oauth_client_id:        string;
   gmb_oauth_client_secret:    string;
 
+  // AI (Anthropic)
+  anthropic_api_key:          string;
+
   // Worker
   worker_poll_ms:             number;
   puppeteer_headless:         boolean;
@@ -51,6 +54,8 @@ export async function getSettings(forceFresh = false): Promise<AppSettings> {
 
     gmb_oauth_client_id:        data?.gmb_oauth_client_id        || process.env.GMB_OAUTH_CLIENT_ID        || '',
     gmb_oauth_client_secret:    data?.gmb_oauth_client_secret    || process.env.GMB_OAUTH_CLIENT_SECRET    || '',
+
+    anthropic_api_key:          data?.anthropic_api_key           || process.env.ANTHROPIC_API_KEY           || '',
     
     worker_poll_ms:             data?.worker_poll_ms             ?? parseInt(process.env.WORKER_POLL_INTERVAL_MS || '5000', 10),
     puppeteer_headless:         data?.puppeteer_headless         ?? (process.env.PUPPETEER_HEADLESS !== 'false'),

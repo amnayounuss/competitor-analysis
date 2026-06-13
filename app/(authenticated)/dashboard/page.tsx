@@ -55,15 +55,18 @@ export default async function DashboardOverview() {
       const latestJobId = latestJob?.id || allSucceededJobs[0].id;
       const targetBrandName = latestJob?.target_name || allSucceededJobs[0].target_name;
 
-      // Deduplicate target brand branches (only take branches from the latest job to avoid duplication)
-      // and keep all competitor branches across all runs!
+      // Deduplicate branches across jobs by branch_name+brand — keep the latest job's entry
       const rawAnalytics = analyticsRes.data || [];
-      const aggregatedAnalytics = rawAnalytics.filter(a => {
-        if (a.brand === targetBrandName) {
-          return a.job_id === latestJobId;
+      const branchMap = new Map<string, any>();
+      const jobOrder = new Map(allSucceededJobs.map((j: any, i: number) => [j.id, i]));
+      for (const a of rawAnalytics) {
+        const key = `${a.brand}::${a.branch_name}::${a.city || ''}`;
+        const existing = branchMap.get(key);
+        if (!existing || (jobOrder.get(a.job_id) ?? 999) < (jobOrder.get(existing.job_id) ?? 999)) {
+          branchMap.set(key, a);
         }
-        return true;
-      });
+      }
+      const aggregatedAnalytics = Array.from(branchMap.values());
 
       const COUNTRY_TO_CODE: Record<string, string> = {
         'saudi arabia': 'sa', 'united arab emirates': 'ae', 'uae': 'ae',

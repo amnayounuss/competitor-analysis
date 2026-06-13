@@ -17,6 +17,7 @@ import { getClientDbCreds, clientDbClient, testClientDb } from './client-db';
 import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
 import { parseAddressesWithClaude } from './anthropic';
+import { getSettings } from './settings';
 
 import {
   fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
@@ -197,13 +198,16 @@ export async function runJob(job: Job): Promise<void> {
       p.__searchBrand = detectBrand(p);
     }
 
-    if (process.env.ANTHROPIC_API_KEY && rawPlaces.length > 0) {
+    const settings = await getSettings();
+    const anthropicKey = settings.anthropic_api_key;
+    if (anthropicKey && rawPlaces.length > 0) {
       await checkCancellation();
       await setProgress(75, 'Stage AI: AI-powered branch naming & city normalization');
       try {
         await log('info', `Running AI Address parser for ${rawPlaces.length} locations...`);
         const parsed = await parseAddressesWithClaude(
-          rawPlaces.map(p => ({ title: p.title || '', address: p.address || '' }))
+          rawPlaces.map(p => ({ title: p.title || '', address: p.address || '' })),
+          anthropicKey
         );
         for (let i = 0; i < rawPlaces.length; i++) {
           if (parsed[i]) {
