@@ -6,7 +6,6 @@ interface Props { settings: any; reload: () => void; }
 export default function GmbTab({ settings, reload }: Props) {
   const [clientId,     setClientId]     = useState(settings.gmb_oauth_client_id || '');
   const [clientSecret, setClientSecret] = useState('');
-  const [anthropicKey, setAnthropicKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState<{type:'ok'|'err'; text:string} | null>(null);
 
@@ -14,13 +13,11 @@ export default function GmbTab({ settings, reload }: Props) {
     setMsg(null); setSaving(true);
     const body: any = { gmb_oauth_client_id: clientId };
     if (clientSecret.trim()) body.gmb_oauth_client_secret = clientSecret.trim();
-    if (anthropicKey.trim()) body.anthropic_api_key = anthropicKey.trim();
     const r = await fetch('/api/admin/settings', { method:'PATCH',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     setSaving(false);
     if (!r.ok) { const j = await r.json(); setMsg({type:'err', text: typeof j.error === 'string' ? j.error : 'save failed'}); return; }
     setClientSecret('');
-    setAnthropicKey('');
     setMsg({type:'ok', text:'Saved'});
     reload();
   }
@@ -61,19 +58,6 @@ export default function GmbTab({ settings, reload }: Props) {
             value={clientSecret}
             onChange={e => setClientSecret(e.target.value)} 
             placeholder="••••••••••••" 
-          />
-        </Field>
-      </div>
-
-      <div className="border-t border-slate-100 pt-6 mt-2">
-        <h3 className="text-lg font-bold text-slate-900 tracking-tight mb-4">AI Address Parser (Anthropic)</h3>
-        <Field label="Anthropic API Key" hint={settings.anthropic_api_key ? 'Key is securely stored' : 'Not set — AI branch naming will be skipped'}>
-          <input
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
-            type="password"
-            value={anthropicKey}
-            onChange={e => setAnthropicKey(e.target.value)}
-            placeholder="sk-ant-api03-••••••••"
           />
         </Field>
       </div>

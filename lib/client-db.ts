@@ -13,7 +13,12 @@ export interface ClientDbCreds {
   service_role_key: string;
 }
 
-/** Pull the user's saved client-DB credentials from admin DB. */
+export async function getClientAnthropicKey(userId: string): Promise<string | null> {
+  const sb = adminClient();
+  const { data } = await sb.from('client_databases').select('anthropic_api_key').eq('user_id', userId).single();
+  return data?.anthropic_api_key || null;
+}
+
 export async function getClientDbCreds(userId: string): Promise<ClientDbCreds> {
   const sb = adminClient();
   const { data, error } = await sb

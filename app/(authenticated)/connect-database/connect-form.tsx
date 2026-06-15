@@ -4,12 +4,13 @@ import { useRouter } from 'next/navigation';
 import { BiInline, useT } from '@/lib/bilingual';
 import { useLang } from '@/lib/lang-context';
 
-export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) {
+export default function ConnectDbForm({ existingUrl, existingAnthropicKey }: { existingUrl: string; existingAnthropicKey?: boolean }) {
   const router = useRouter();
   const t = useT();
   const { isAr } = useLang();
   const [url, setUrl] = useState(existingUrl);
   const [key, setKey] = useState('');
+  const [anthropicKey, setAnthropicKey] = useState('');
   const [schemaConfirmed, setSchemaConfirmed] = useState(false);
 
   const [testing, setTesting] = useState(false);
@@ -30,9 +31,11 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
 
   async function save() {
     setMsg(null); setSaving(true);
+    const body: any = { supabase_url: url.trim(), service_role_key: key.trim() };
+    if (anthropicKey.trim()) body.anthropic_api_key = anthropicKey.trim();
     const r = await fetch('/api/client-db', {
       method: 'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ supabase_url: url.trim(), service_role_key: key.trim() }),
+      body: JSON.stringify(body),
     });
     setSaving(false);
     const j = await r.json();
@@ -76,6 +79,20 @@ export default function ConnectDbForm({ existingUrl }: { existingUrl: string }) 
           </div>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
             <BiInline en="Settings → API → 'service_role' (secret)" />
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Anthropic API Key" /></label>
+          <input
+            type="password"
+            value={anthropicKey}
+            onChange={e => setAnthropicKey(e.target.value)}
+            placeholder="sk-ant-api03-••••••••"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-300 shadow-sm"
+          />
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+            <BiInline en={existingAnthropicKey ? 'Key stored — leave blank to keep current' : 'Used for AI branch naming & city normalization'} />
           </p>
         </div>
 

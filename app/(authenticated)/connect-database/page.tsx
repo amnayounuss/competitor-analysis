@@ -17,7 +17,7 @@ export default async function ConnectDbPage() {
   const admin = adminClient();
   const { data: existing } = await admin
     .from('client_databases')
-    .select('supabase_url, last_test_ok, updated_at')
+    .select('supabase_url, last_test_ok, updated_at, anthropic_api_key')
     .eq('user_id', user.id).maybeSingle();
 
   // Read the canonical client schema so user can copy it inline
@@ -88,7 +88,7 @@ export default async function ConnectDbPage() {
         {/* ──────── Step 3: Paste credentials ──────── */}
         <Step n={3} title={<BiInline en="Paste your project credentials" />}
           sub={<BiInline en="From Supabase: Settings → API — copy Project URL and service_role key." />}>
-          <ConnectDbForm existingUrl={existing?.supabase_url || ''} />
+          <ConnectDbForm existingUrl={existing?.supabase_url || ''} existingAnthropicKey={!!existing?.anthropic_api_key} />
         </Step>
 
       </div>

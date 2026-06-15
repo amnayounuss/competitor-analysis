@@ -107,6 +107,72 @@ Address: "${b.address}"`
   }
 }
 
+export interface SearchQuery {
+  query: string;
+  brand: string;
+}
+
+export async function expandSearchQueries(
+  competitors: Array<{ brand: string; aliases: string[] }>,
+  searchLocation: string,
+  apiKey: string
+): Promise<SearchQuery[]> {
+  const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+
+  const systemPrompt = `You are a Google Maps search optimization expert. Given a list of brands and a search location, generate the most effective Google Maps search queries to discover ALL branches/stores of each brand in that region.
+
+Rules:
+1. If the location is a country, generate queries for all major cities and regions where the brand likely operates
+2. Include both English and Arabic name variations
+3. Include common suffixes like "sweets", "chocolate", "café" etc. if relevant
+4. Each query should be: "brand_variation city/region" format
+5. For Saudi Arabia major cities: Riyadh, Jeddah, Makkah, Madinah, Dammam, Al Khobar, Dhahran, Tabuk, Abha, Taif, Hail, Najran, Yanbu, Al Jubail, Buraidah, Khamis Mushait, Al Hofuf, Al Kharj, Sakaka, Jazan, Al Bahah, Hafar Al Batin, Unaizah, Al Majmaah
+6. For UAE: Dubai, Abu Dhabi, Sharjah, Ajman, Ras Al Khaimah, Fujairah, Al Ain
+7. Don't repeat the same effective query. "Tawa Riyadh" and "تاوة الرياض" are different and both useful
+8. Generate 10-30 queries per brand depending on brand size and region coverage
+
+Output a JSON array inside a \`\`\`json\`\`\` code block:
+[{"query": "search text for google maps", "brand": "BrandName"}, ...]`;
+
+  const userContent = competitors.map(c =>
+    `Brand: "${c.brand}"\nKnown aliases: ${c.aliases.join(', ')}`
+  ).join('\n\n') + `\n\nSearch Location: "${searchLocation}"`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`AI search expansion failed: ${response.status}: ${errorText}`);
+  }
+
+  const result = await response.json();
+  const text = result.content?.[0]?.text || '';
+
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : text;
+
+  const parsed = JSON.parse(jsonStr.trim());
+  if (!Array.isArray(parsed)) throw new Error('AI did not return a JSON array');
+
+  return parsed.map((q: any) => ({
+    query: String(q.query || '').trim(),
+    brand: String(q.brand || '').trim(),
+  })).filter((q: SearchQuery) => q.query && q.brand);
+}
+
 /**
  * Compiles performance metrics, branch rankings, and rating distribution into
  * a highly strategic, professional, and actionable Executive Summary in Markdown.

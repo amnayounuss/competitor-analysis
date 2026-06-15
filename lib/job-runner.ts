@@ -16,8 +16,8 @@ import { notify } from './notifications';
 import { getClientDbCreds, clientDbClient, testClientDb } from './client-db';
 import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
-import { parseAddressesWithClaude } from './anthropic';
-import { getSettings } from './settings';
+import { parseAddressesWithClaude, expandSearchQueries } from './anthropic';
+import { getClientAnthropicKey } from './client-db';
 
 import {
   fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
@@ -134,7 +134,36 @@ export async function runJob(job: Job): Promise<void> {
       }
     }
 
-    // ── Stage C — competitors ──
+    // ── Stage C — AI-expanded search + competitors ──
+    await checkCancellation();
+    const anthropicKey = await getClientAnthropicKey(job.user_id);
+    if (anthropicKey && cfg.searchLocation) {
+      await setProgress(40, 'AI: expanding search queries for full coverage');
+      try {
+        const parsedComps = cfg.COMPETITORS.reduce((acc: Array<{brand: string; aliases: string[]}>, c) => {
+          const existing = acc.find(a => a.brand === c.key);
+          if (existing) { if (!existing.aliases.includes(c.name)) existing.aliases.push(c.name); }
+          else acc.push({ brand: c.key, aliases: [c.name] });
+          return acc;
+        }, []);
+
+        const aiQueries = await expandSearchQueries(parsedComps, cfg.searchLocation, anthropicKey);
+        const existingUrls = new Set(cfg.COMPETITORS.map(c => c.url));
+        let added = 0;
+        for (const q of aiQueries) {
+          const url = `https://www.google.com/maps/search/${encodeURIComponent(q.query)}/?hl=en`;
+          if (!existingUrls.has(url)) {
+            cfg.COMPETITORS.push({ key: q.brand, name: q.query, url });
+            existingUrls.add(url);
+            added++;
+          }
+        }
+        await log('info', `AI search expansion: ${aiQueries.length} queries generated, ${added} new searches added (${cfg.COMPETITORS.length} total)`);
+      } catch (err: any) {
+        await log('warn', `AI search expansion failed: ${err.message} — using original queries`);
+      }
+    }
+
     await checkCancellation();
     await setProgress(45, 'Stage C: competitors');
     let competitors: any[] = [];
@@ -198,16 +227,15 @@ export async function runJob(job: Job): Promise<void> {
       p.__searchBrand = detectBrand(p);
     }
 
-    const settings = await getSettings();
-    const anthropicKey = settings.anthropic_api_key;
-    if (anthropicKey && rawPlaces.length > 0) {
+    const clientAiKey = anthropicKey ?? await getClientAnthropicKey(job.user_id);
+    if (clientAiKey && rawPlaces.length > 0) {
       await checkCancellation();
       await setProgress(75, 'Stage AI: AI-powered branch naming & city normalization');
       try {
         await log('info', `Running AI Address parser for ${rawPlaces.length} locations...`);
         const parsed = await parseAddressesWithClaude(
           rawPlaces.map(p => ({ title: p.title || '', address: p.address || '' })),
-          anthropicKey
+          clientAiKey
         );
         for (let i = 0; i < rawPlaces.length; i++) {
           if (parsed[i]) {
@@ -371,6 +399,10 @@ async function pushDataToClientDb(
     is_target: detectBrand(p) === job.target_name,
   }));
 
+  // Clean up stale data from previous runs of the same job
+  await cdb.from('reviews').delete().eq('job_id', jobId);
+  await cdb.from('branches').delete().eq('job_id', jobId);
+
   const { data: insertedBranches, error: branchErr } = await cdb
     .from('branches').insert(branchRows).select('id, branch_name, brand');
   if (branchErr) throw new Error('Failed inserting branches: ' + branchErr.message);
@@ -520,10 +552,16 @@ async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any) {
 
 /** Build a brand-classifier closure over this job's target + competitors. */
 function makeBrandDetector(target: string, competitors: string[]) {
-  const keywords = [
+  const keywords: Array<{keyword: string; brand: string}> = [
     { keyword: target.toLowerCase(), brand: target },
-    ...competitors.map(c => ({ keyword: c.toLowerCase(), brand: c })),
   ];
+  for (const c of competitors) {
+    const parts = c.split('|').map(s => s.trim()).filter(Boolean);
+    const brand = parts[0];
+    for (const alias of parts) {
+      keywords.push({ keyword: alias.toLowerCase(), brand });
+    }
+  }
   return function detect(p: any): string {
     if (p?.__searchBrand) return p.__searchBrand;
     if (p?.__brandHint)   return p.__brandHint;

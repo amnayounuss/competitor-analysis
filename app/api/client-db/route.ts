@@ -6,6 +6,7 @@ import { testClientDb } from '@/lib/client-db';
 const Schema = z.object({
   supabase_url: z.string().url(),
   service_role_key: z.string().min(40),
+  anthropic_api_key: z.string().optional(),
 });
 
 // ── POST /api/client-db/test — validate without saving
@@ -41,7 +42,7 @@ export async function PUT(req: NextRequest) {
   }
 
   const admin = adminClient();
-  const { error } = await admin.from('client_databases').upsert({
+  const upsertData: any = {
     user_id: user.id,
     supabase_url: parsed.data.supabase_url,
     service_role_key: parsed.data.service_role_key,
@@ -49,7 +50,11 @@ export async function PUT(req: NextRequest) {
     last_test_at: new Date().toISOString(),
     last_test_error: null,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' });
+  };
+  if (parsed.data.anthropic_api_key) {
+    upsertData.anthropic_api_key = parsed.data.anthropic_api_key;
+  }
+  const { error } = await admin.from('client_databases').upsert(upsertData, { onConflict: 'user_id' });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

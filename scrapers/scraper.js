@@ -489,19 +489,9 @@ async function scrapeCompetitors() {
   }
   try {
     let branches;
-    if (fs.existsSync(config.COMP_BRANCHES)) {
-      console.log(`[scraper] stage 1 cache at ${config.COMP_BRANCHES} — reusing`);
-      try {
-        branches = JSON.parse(fs.readFileSync(config.COMP_BRANCHES, "utf8"));
-      } catch {
-        console.warn("[scraper] corrupt stage 1 cache — re-discovering");
-        branches = await discoverBranches(browser);
-        fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
-      }
-    } else {
-      branches = await discoverBranches(browser);
-      fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
-    }
+    console.log('[scraper] running fresh competitor discovery (cache disabled)');
+    branches = await discoverBranches(browser);
+    fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
     if (!branches || branches.length === 0) {
       console.warn("[scraper] no competitor branches discovered — continuing with empty list");
       return [];
