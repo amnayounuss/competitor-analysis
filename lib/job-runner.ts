@@ -178,12 +178,11 @@ export async function runJob(job: Job): Promise<void> {
     if (competitors.length > 0 && anthropicKey) {
       try {
         await setProgress(50, 'AI: verifying competitor branches');
-        const parsedComps = cfg.COMPETITORS.reduce((acc: Array<{brand: string; aliases: string[]}>, c) => {
-          const existing = acc.find(a => a.brand === c.key);
-          if (existing) { if (!existing.aliases.includes(c.name)) existing.aliases.push(c.name); }
-          else acc.push({ brand: c.key, aliases: [c.name] });
-          return acc;
-        }, []);
+        // Use the original pipe-separated competitor strings for real brand aliases
+        const parsedComps = job.competitors.map(raw => {
+          const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+          return { brand: parts[0], aliases: parts };
+        });
 
         for (const comp of parsedComps) {
           const compPlaces = competitors.filter(p => {
@@ -208,7 +207,7 @@ export async function runJob(job: Job): Promise<void> {
             const sb = (p.__searchBrand || '').toLowerCase();
             return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
           }).length;
-          if (removed > 0) await log('info', `AI verification: removed ${removed} false positives for "${comp.brand}" (${before} → ${before - removed})`);
+          await log('info', `AI verification for "${comp.brand}": ${removed} false positives removed (${before} → ${before - removed})`);
         }
       } catch (err: any) {
         await log('warn', `AI chain verification failed: ${err.message} — keeping all discovered branches`);
