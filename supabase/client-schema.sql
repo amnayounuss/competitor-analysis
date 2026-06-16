@@ -10,6 +10,7 @@
 create table if not exists public.branches (
   id              uuid        primary key default gen_random_uuid(),
   job_id          uuid        not null,                   -- from the SaaS app
+  place_id        text,                                   -- Google Maps place identifier for dedup
   brand           text        not null,                   -- target brand or competitor name
   branch_name     text        not null,
   city            text,

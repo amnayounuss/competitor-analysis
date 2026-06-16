@@ -55,12 +55,17 @@ export default async function DashboardOverview() {
       const latestJobId = latestJob?.id || allSucceededJobs[0].id;
       const targetBrandName = latestJob?.target_name || allSucceededJobs[0].target_name;
 
-      // Deduplicate branches across jobs by branch_name+brand — keep the latest job's entry
+      // Target brand: keep only latest job (same branches every run from Business Profile API,
+      // but AI-parsed names/cities may differ across runs causing false duplicates).
+      // Competitors: deduplicate across jobs by place_id (preferred) or branch_name+city.
       const rawAnalytics = analyticsRes.data || [];
       const branchMap = new Map<string, any>();
       const jobOrder = new Map(allSucceededJobs.map((j: any, i: number) => [j.id, i]));
       for (const a of rawAnalytics) {
-        const key = `${a.brand}::${a.branch_name}::${a.city || ''}`;
+        if (a.brand === targetBrandName && a.job_id !== latestJobId) continue;
+        const key = a.place_id
+          ? `${a.brand}::pid::${a.place_id}`
+          : `${a.brand}::${a.branch_name}::${a.city || ''}`;
         const existing = branchMap.get(key);
         if (!existing || (jobOrder.get(a.job_id) ?? 999) < (jobOrder.get(existing.job_id) ?? 999)) {
           branchMap.set(key, a);

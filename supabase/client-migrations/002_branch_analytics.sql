@@ -20,6 +20,9 @@ create table if not exists public.branch_analytics (
   job_id                  uuid         not null,
   branch_id               uuid         references public.branches(id) on delete cascade,
 
+  -- Google Maps place identifier for cross-job deduplication
+  place_id                text,
+
   -- denormalized for fast lookup
   brand                   text         not null,
   branch_name             text         not null,

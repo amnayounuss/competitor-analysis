@@ -16,7 +16,7 @@ import { notify } from './notifications';
 import { getClientDbCreds, clientDbClient, testClientDb } from './client-db';
 import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
-import { parseAddressesWithClaude, expandSearchQueries } from './anthropic';
+import { parseAddressesWithClaude, expandSearchQueries, verifyChainBranches } from './anthropic';
 import { getClientAnthropicKey } from './client-db';
 
 import {
@@ -172,6 +172,47 @@ export async function runJob(job: Job): Promise<void> {
       await log('info', `Stage C — ${competitors.length} competitor branches`);
     } catch (err: any) {
       await log('warn', `Stage C failed: ${err.message} — continuing with target data only`);
+    }
+
+    // ── AI chain verification — filter false positives from competitor discovery ──
+    if (competitors.length > 0 && anthropicKey) {
+      try {
+        await setProgress(50, 'AI: verifying competitor branches');
+        const parsedComps = cfg.COMPETITORS.reduce((acc: Array<{brand: string; aliases: string[]}>, c) => {
+          const existing = acc.find(a => a.brand === c.key);
+          if (existing) { if (!existing.aliases.includes(c.name)) existing.aliases.push(c.name); }
+          else acc.push({ brand: c.key, aliases: [c.name] });
+          return acc;
+        }, []);
+
+        for (const comp of parsedComps) {
+          const compPlaces = competitors.filter(p => {
+            const sb = (p.__searchBrand || '').toLowerCase();
+            return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
+          });
+          if (compPlaces.length === 0) continue;
+
+          const titles = compPlaces.map(p => p.title || '');
+          const uniqueTitles = Array.from(new Set(titles));
+          const validIndices = await verifyChainBranches(comp.brand, comp.aliases, uniqueTitles, anthropicKey);
+          const validTitles = new Set(uniqueTitles.filter((_, i) => validIndices.has(i)));
+
+          const before = compPlaces.length;
+          competitors = competitors.filter(p => {
+            const sb = (p.__searchBrand || '').toLowerCase();
+            const isThisComp = sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
+            if (!isThisComp) return true;
+            return validTitles.has(p.title);
+          });
+          const removed = before - competitors.filter(p => {
+            const sb = (p.__searchBrand || '').toLowerCase();
+            return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
+          }).length;
+          if (removed > 0) await log('info', `AI verification: removed ${removed} false positives for "${comp.brand}" (${before} → ${before - removed})`);
+        }
+      } catch (err: any) {
+        await log('warn', `AI chain verification failed: ${err.message} — keeping all discovered branches`);
+      }
     }
 
     let rawPlaces = [...target, ...competitors];
@@ -383,8 +424,18 @@ async function pushDataToClientDb(
     return Number((valid.reduce((s, n) => s + n, 0) / valid.length).toFixed(2));
   };
 
-  // Insert branches and capture their generated UUIDs to link reviews
-  const branchRows = rawPlaces.map(p => ({
+  // Deduplicate raw places by placeId (same physical location may appear
+  // multiple times from different search queries with varying transliterations)
+  const dedupedPlaces: typeof rawPlaces = [];
+  const seenPlaceIds = new Set<string>();
+  for (const p of rawPlaces) {
+    const pid = p.placeId || p.place_id;
+    if (pid && seenPlaceIds.has(pid)) continue;
+    if (pid) seenPlaceIds.add(pid);
+    dedupedPlaces.push(p);
+  }
+
+  const branchRows = dedupedPlaces.map(p => ({
     job_id: jobId,
     brand: detectBrand(p),
     branch_name: p.title || '(unknown)',
@@ -397,14 +448,20 @@ async function pushDataToClientDb(
     reviews_count: p.reviewsCount || p.reviews_count || p.reviews?.length || 0,
     popular_times: p.popularTimes?.grid || p.popular_times || null,
     is_target: detectBrand(p) === job.target_name,
+    place_id: p.placeId || p.place_id || null,
   }));
 
   // Clean up stale data from previous runs of the same job
   await cdb.from('reviews').delete().eq('job_id', jobId);
   await cdb.from('branches').delete().eq('job_id', jobId);
 
-  const { data: insertedBranches, error: branchErr } = await cdb
+  let { data: insertedBranches, error: branchErr } = await cdb
     .from('branches').insert(branchRows).select('id, branch_name, brand');
+  if (branchErr?.message?.includes('place_id')) {
+    const rowsNoPid = branchRows.map(({ place_id, ...rest }) => rest);
+    ({ data: insertedBranches, error: branchErr } = await cdb
+      .from('branches').insert(rowsNoPid).select('id, branch_name, brand'));
+  }
   if (branchErr) throw new Error('Failed inserting branches: ' + branchErr.message);
 
   const branchIdByKey = new Map<string, string>();
@@ -467,7 +524,7 @@ async function pushDataToClientDb(
   // ── Branch analytics (mirrors Excel "Branch Wise Data" sheet) ──
   if (analysis?.branchRows?.length > 0) {
     const placeByName = new Map<string, any>();
-    for (const p of rawPlaces) placeByName.set(p.title, p);
+    for (const p of dedupedPlaces) placeByName.set(p.title, p);
 
     const analyticsRows = analysis.branchRows.map((r: any) => {
       const pt   = r.popularTimes || {};
@@ -516,12 +573,20 @@ async function pushDataToClientDb(
         popular_times_grid: pt.grid || null,
         date_start: window.dateStart,
         date_end:   window.dateEnd,
+        place_id: place?.placeId || place?.place_id || null,
       };
     });
 
+    let stripPlaceId = false;
     for (let i = 0; i < analyticsRows.length; i += 200) {
-      const chunk = analyticsRows.slice(i, i + 200);
-      const { error } = await cdb.from('branch_analytics').insert(chunk);
+      let chunk = analyticsRows.slice(i, i + 200);
+      if (stripPlaceId) chunk = chunk.map(({ place_id, ...rest }: any) => rest);
+      let { error } = await cdb.from('branch_analytics').insert(chunk);
+      if (error?.message?.includes('place_id') && !stripPlaceId) {
+        stripPlaceId = true;
+        chunk = chunk.map(({ place_id, ...rest }: any) => rest);
+        ({ error } = await cdb.from('branch_analytics').insert(chunk));
+      }
       if (error) throw new Error('Failed inserting branch_analytics: ' + error.message);
     }
   }
@@ -550,25 +615,54 @@ async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any) {
   return { excel_url: pub1.publicUrl, report_url: pub2.publicUrl };
 }
 
-/** Build a brand-classifier closure over this job's target + competitors. */
+/** Build a brand-classifier closure over this job's target + competitors.
+ *  For the target brand (from Business Profile API) we trust __searchBrand.
+ *  For competitors (from Maps scraping) we validate the title actually matches
+ *  an alias — the scraper tags ALL results from a search query with the brand,
+ *  even unrelated businesses. */
 function makeBrandDetector(target: string, competitors: string[]) {
-  const keywords: Array<{keyword: string; brand: string}> = [
-    { keyword: target.toLowerCase(), brand: target },
-  ];
+  const targetLower = target.toLowerCase();
+  const brandAliases = new Map<string, string[]>();
   for (const c of competitors) {
     const parts = c.split('|').map(s => s.trim()).filter(Boolean);
     const brand = parts[0];
-    for (const alias of parts) {
-      keywords.push({ keyword: alias.toLowerCase(), brand });
-    }
+    const aliases = parts.map(p => p.toLowerCase());
+    brandAliases.set(brand, aliases);
   }
-  return function detect(p: any): string {
-    if (p?.__searchBrand) return p.__searchBrand;
-    if (p?.__brandHint)   return p.__brandHint;
-    const t = (p?.title || '').toLowerCase();
-    for (const { keyword, brand } of keywords) {
-      if (keyword && t.includes(keyword)) return brand;
+
+  function stripBrandNoise(s: string): string {
+    return s
+      .replace(/\b(sweets?|chocolat\w*|chocolate|cafe|restaurant)\b/gi, ' ')
+      .replace(/[.()&]/g, ' ')
+      .replace(/(حلويات|وشوكولا|شوكولاته?)/g, ' ')
+      .replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function titleMatchesBrand(title: string, aliases: string[]): boolean {
+    const segments = title.split(/\s*[|]\s*/).map(s => s.trim()).filter(Boolean);
+    for (const seg of segments) {
+      const stripped = stripBrandNoise(seg);
+      for (const alias of aliases) {
+        if (stripped === alias) return true;
+        if (seg.toLowerCase().trim() === alias) return true;
+      }
+      // After stripping noise, also strip known aliases to check if nothing meaningful remains
+      let residual = stripped;
+      for (const alias of aliases) residual = residual.replace(alias, ' ');
+      if (stripped !== residual.replace(/\s+/g, ' ').trim() && residual.replace(/\s+/g, '').length === 0) return true;
     }
+    return false;
+  }
+
+  return function detect(p: any): string {
+    const t = (p?.title || '').toLowerCase().trim();
+    if (t.includes(targetLower)) return target;
+    if (p?.__searchBrand === target) return target;
+    let found: string | null = null;
+    brandAliases.forEach((aliases, brand) => {
+      if (!found && titleMatchesBrand(p?.title || '', aliases)) { found = brand; }
+    });
+    if (found) return found;
     return 'Other';
   };
 }

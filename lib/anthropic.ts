@@ -107,6 +107,66 @@ Address: "${b.address}"`
   }
 }
 
+/**
+ * AI-powered chain branch verification. Given a brand name and a list of
+ * discovered Google Maps titles, returns which ones are actual chain branches
+ * vs unrelated businesses that happen to share a word.
+ */
+export async function verifyChainBranches(
+  brand: string,
+  aliases: string[],
+  titles: string[],
+  apiKey: string
+): Promise<Set<number>> {
+  if (titles.length === 0) return new Set();
+  const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+
+  const systemPrompt = `You are a Google Maps data analyst. You are given a brand name, its known aliases, and a list of Google Maps business titles discovered by searching for that brand.
+
+Your task: identify which titles are ACTUAL branches/stores of the "${brand}" chain, and which are UNRELATED businesses that just happen to contain a similar word.
+
+Rules:
+- The brand "${brand}" is a chain with aliases: ${aliases.join(', ')}
+- A title IS a branch if it's clearly the same brand (exact name, bilingual variant, or name + standard suffix like "Sweets", "Chocolate", "Cafe")
+- A title is NOT a branch if it's a different business that contains a similar word (e.g. "Bread & Tawa" is NOT "Tawa Sweets", "تاوة زمان" is NOT "تاوة")
+- When uncertain, lean toward EXCLUDING — false negatives are better than false positives
+
+Output a JSON array of the 0-based indices of titles that ARE real branches, inside a \`\`\`json\`\`\` block. Example: \`\`\`json\n[0, 2, 5]\n\`\`\``;
+
+  const userContent = titles.map((t, i) => `${i}. "${t}"`).join('\n');
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+
+  if (!response.ok) {
+    console.error('[AI] Chain verification failed:', response.status);
+    return new Set(titles.map((_, i) => i));
+  }
+
+  const result = await response.json();
+  const text = result.content?.[0]?.text || '';
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\[\s*[\d,\s]*\]/);
+  try {
+    const indices: number[] = JSON.parse(jsonMatch?.[1] || jsonMatch?.[0] || '[]');
+    return new Set(indices.filter(i => typeof i === 'number' && i >= 0 && i < titles.length));
+  } catch {
+    console.error('[AI] Failed to parse chain verification response:', text);
+    return new Set(titles.map((_, i) => i));
+  }
+}
+
 export interface SearchQuery {
   query: string;
   brand: string;
