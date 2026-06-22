@@ -181,6 +181,40 @@ function mapsUrlFromPlaceId(placeId) {
   return `https://www.google.com/maps/place/?q=place_id:${placeId}`;
 }
 
+// Business Profile API regularHours → compact "Mon: 09:00–22:00 | Tue: …" string.
+// periods[].openTime/closeTime are TimeOfDay objects {hours, minutes} (or "HH:MM").
+const DAY_ABBR = {
+  MONDAY: "Mon", TUESDAY: "Tue", WEDNESDAY: "Wed", THURSDAY: "Thu",
+  FRIDAY: "Fri", SATURDAY: "Sat", SUNDAY: "Sun",
+};
+const DAY_ORDER = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"];
+
+function fmtTime(t) {
+  if (t == null) return "";
+  if (typeof t === "string") return t;
+  const h = String(t.hours ?? 0).padStart(2, "0");
+  const m = String(t.minutes ?? 0).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function formatRegularHours(regularHours) {
+  const periods = regularHours?.periods;
+  if (!Array.isArray(periods) || periods.length === 0) return "";
+  const byDay = {};
+  for (const p of periods) {
+    const day = p.openDay || p.closeDay;
+    if (!day) continue;
+    const open = fmtTime(p.openTime);
+    const close = fmtTime(p.closeTime);
+    const span = open || close ? `${open || "00:00"}–${close || "24:00"}` : "Open 24 hours";
+    (byDay[day] = byDay[day] || []).push(span);
+  }
+  return DAY_ORDER
+    .filter((d) => byDay[d])
+    .map((d) => `${DAY_ABBR[d]}: ${byDay[d].join(", ")}`)
+    .join(" | ");
+}
+
 function convertReview(r) {
   // v4 returns starRating as an enum string: "ONE".."FIVE"
   const map = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
@@ -206,13 +240,27 @@ async function fetchTarget() {
   console.log(`  ✓ ${accounts.length} account(s) found`);
 
   const merged = [];
+  let totalSkippedDup = 0, totalSkippedClosed = 0;
 
   for (const acc of accounts) {
     const locs = await listLocationsForAccount(token, acc.name);
     console.log(`  ✓ account ${acc.name}: ${locs.length} locations`);
-
     for (let i = 0; i < locs.length; i++) {
       const loc = locs[i];
+
+      // Skip duplicate locations flagged by Google
+      if (loc.metadata?.duplicateLocation) {
+        totalSkippedDup++;
+        console.log(`    ✗ skipped duplicate: "${loc.title}" (flagged by Google)`);
+        continue;
+      }
+
+      const openStatus = loc.openInfo?.status;
+      if (openStatus === 'CLOSED_PERMANENTLY') {
+        totalSkippedClosed++;
+        console.log(`    ✗ skipped closed: "${loc.title}" (${openStatus})`);
+        continue;
+      }
 
       const title   = loc.title || "";
       const address = formatAddress(loc.storefrontAddress);
@@ -232,34 +280,29 @@ async function fetchTarget() {
         }
       }
 
-      // Reviews — tries the v4 API; silently empty if scope/permission missing
+      // Reviews — fetched from the GMB v4 API (free, full history for the
+      // brand we OWN). Downstream filters them to the job's date window.
+      // (Competitor reviews come from Apify; Google has no public reviews API
+      // for places you don't own.)
       let reviews = [];
       try {
         const raw = await listReviewsForLocation(token, acc.name, loc.name);
         reviews = raw.map(convertReview);
       } catch {}
 
-      // Compute aggregate rating from the fetched reviews. The Business
-      // Profile API doesn't expose a place-level average, so we derive it.
-      let rating = null;
-      let reviewsCount = reviews.length;
-      if (reviews.length) {
-        const valid = reviews.filter(r => Number(r.stars) >= 1 && Number(r.stars) <= 5);
-        if (valid.length) {
-          rating = Number((valid.reduce((s, r) => s + Number(r.stars), 0) / valid.length).toFixed(2));
-        }
-      }
+      // Hours come straight from the GMB regularHours field (no scraping).
+      const hours = formatRegularHours(loc.regularHours);
 
       merged.push({
         title,
         address,
         addressLink: mapsUrl,
-        hours:       "",          // filled later by hoursScraper.js via Puppeteer
+        hours,
         phone,
         placeId,
         url:         mapsUrl,
-        rating,
-        reviewsCount,
+        rating:      null,        // place-level avg filled by Places API enrichment
+        reviewsCount: reviews.length || null,
         reviews,
         __searchBrand: brand,
       });
@@ -270,12 +313,30 @@ async function fetchTarget() {
     }
   }
 
-  const totalReviews = merged.reduce((s, b) => s + b.reviews.length, 0);
-  const withPlaceId  = merged.filter((b) => b.placeId).length;
-  console.log(`\n  ✓ ${brand}: ${merged.length} branches | ${totalReviews} reviews | ${withPlaceId} have placeId`);
-  console.log("  (business hours will be scraped from Google Maps in a later step)\n");
+  // Dedup by placeId — the same physical branch can be listed under more than
+  // one GMB account (the client owns several), which Google does NOT flag as
+  // metadata.duplicateLocation. Counting it twice would inflate the branch
+  // count, so keep the first occurrence of each placeId.
+  const dedupById = [];
+  const seenPid = new Set();
+  let crossAcctDup = 0;
+  for (const b of merged) {
+    if (b.placeId) {
+      if (seenPid.has(b.placeId)) { crossAcctDup++; continue; }
+      seenPid.add(b.placeId);
+    }
+    dedupById.push(b);
+  }
 
-  return merged;
+  const withPlaceId  = dedupById.filter((b) => b.placeId).length;
+  const withHours    = dedupById.filter((b) => b.hours).length;
+  console.log(`\n  ✓ ${brand}: ${dedupById.length} unique branches | ${withPlaceId} have placeId | ${withHours} have hours (from GMB)`);
+  if (totalSkippedDup > 0 || totalSkippedClosed > 0 || crossAcctDup > 0) {
+    console.log(`    skipped: ${totalSkippedDup} Google-flagged duplicates, ${totalSkippedClosed} permanently closed, ${crossAcctDup} cross-account duplicates (same placeId)`);
+  }
+  console.log("  (ratings & review counts will be fetched from the Places API next)\n");
+
+  return dedupById;
 }
 
 module.exports = { fetchTarget };

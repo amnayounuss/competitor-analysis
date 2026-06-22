@@ -24,6 +24,10 @@ const _hoursScraper   = require('./hours-scraper');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _scraper        = require('./scraper');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const _placesFetcher  = require('./places-fetcher');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const _apifyFetcher   = require('./apify-fetcher');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const _popularTimes   = require('./popular-times');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _analyzer       = require('./analyzer');
@@ -55,6 +59,36 @@ export async function scrapeHoursForTarget(branches: any[], cfg: JobConfig, canc
 // ── Stage C ────────────────────────────────────────────────
 export async function scrapeCompetitors(cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
   return withConfig(cfg, cancelCheck, () => _scraper.scrapeCompetitors());
+}
+
+// ── Stage C (Places API discovery) ─────────────────────────
+// Authoritative competitor discovery via the Google Places API. Returns
+// branches keyed by ChIJ place_id (exact dedup, country-filtered, closed
+// branches dropped). Reviews are filled afterwards by scrapeReviewsForBranches.
+export async function fetchCompetitorsViaPlaces(cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _placesFetcher.fetchCompetitorsViaPlaces());
+}
+
+// Fill Google rating + review count (+ Maps link) on branches that have a
+// placeId — used for the GMB-sourced target brand.
+export async function enrichRatingsViaPlaces(branches: any[], cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _placesFetcher.enrichRatingsViaPlaces(branches));
+}
+
+// Attach Apify data (reviews + star distribution + popular times) onto branches
+// by placeId. Used for competitors (reviews + PT) and for target popular times.
+export async function enrichBranchesViaApify(
+  branches: any[],
+  opts: { maxReviews?: number; reviewsStartDate?: string; fillRating?: boolean; language?: string },
+  cfg: JobConfig,
+  cancelCheck: (() => Promise<void>) | null = null,
+): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _apifyFetcher.enrichBranchesViaApify(branches, opts));
+}
+
+// Stage 2 only (reviews + hours) over a pre-discovered branch list.
+export async function scrapeReviewsForBranches(branches: any[], cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _scraper.scrapeProvidedBranches(branches));
 }
 
 // ── Stage A2 (fallback) ───────────────────────────────────

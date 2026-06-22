@@ -378,6 +378,13 @@ async function scrapeBranchFull(browser, branch, idx, total) {
     // Capture the current URL after redirect (Google normalizes place URLs)
     const normalizedUrl = page.url();
 
+    // Extract placeId (CID) and coordinates from the resolved URL
+    const cidMatch = normalizedUrl.match(/!1s(0x[a-f0-9]+:0x[a-f0-9]+)/i);
+    const coordMatch = normalizedUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    const placeId = cidMatch ? cidMatch[1] : null;
+    const lat = coordMatch ? parseFloat(coordMatch[1]) : null;
+    const lng = coordMatch ? parseFloat(coordMatch[2]) : null;
+
     // 1) details (address + hours + phone)
     const details = await extractBranchDetails(page);
 
@@ -402,19 +409,27 @@ async function scrapeBranchFull(browser, branch, idx, total) {
       text:            r.text,
     }));
 
-    console.log(`    → ${reviews.length} reviews, addr: ${details.address.slice(0,40) || "(none)"}`);
+    console.log(`    → ${reviews.length} reviews, addr: ${(details.address || branch.address || "").slice(0,40) || "(none)"}`);
     await page.close();
 
+    // Merge with any authoritative metadata the branch already carries (e.g.
+    // from the Places API discovery): prefer freshly-scraped values, but fall
+    // back to the incoming ones so we never lose the ChIJ placeId / coords /
+    // address / hours that Places already gave us.
     return {
       title:        branch.title,
-      address:      details.address,
-      addressLink:  normalizedUrl,
-      hours:        details.hours,
-      phone:        details.phone,
-      url:          normalizedUrl,
-      rating:       details.rating,        // place-level overall rating (1-5, may be null)
-      reviewsCount: details.reviewsCount,  // Google's reported review count
+      address:      details.address || branch.address || "",
+      addressLink:  normalizedUrl || branch.addressLink || branch.url || "",
+      hours:        details.hours || branch.hours || "",
+      phone:        details.phone || branch.phone || "",
+      website:      branch.website || "",
+      url:          normalizedUrl || branch.url || "",
+      rating:       details.rating != null ? details.rating : (branch.rating ?? null),
+      reviewsCount: details.reviewsCount != null ? details.reviewsCount : (branch.reviewsCount ?? null),
       reviews,
+      placeId:      placeId || branch.placeId || null,
+      lat:          lat != null ? lat : (branch.lat ?? null),
+      lng:          lng != null ? lng : (branch.lng ?? null),
       __searchBrand: branch.__searchBrand,
     };
   } catch (err) {
@@ -480,6 +495,12 @@ async function scrapeBranches(browser, branches) {
 // ─────────────── public entry point ───────────────
 
 async function scrapeCompetitors() {
+  // Clear stale Stage 2 cache so a crash never returns data from a previous job run
+  if (fs.existsSync(config.COMP_REVIEWS)) {
+    fs.unlinkSync(config.COMP_REVIEWS);
+    console.log('[scraper] cleared stale competitor_reviews cache');
+  }
+
   let browser;
   try {
     browser = await launchBrowser();
@@ -487,32 +508,53 @@ async function scrapeCompetitors() {
     console.error(`[scraper] failed to launch browser: ${err.message}`);
     return [];
   }
+
+  let branches;
   try {
-    let branches;
     console.log('[scraper] running fresh competitor discovery (cache disabled)');
     branches = await discoverBranches(browser);
     fs.writeFileSync(config.COMP_BRANCHES, JSON.stringify(branches, null, 2));
     if (!branches || branches.length === 0) {
       console.warn("[scraper] no competitor branches discovered — continuing with empty list");
+      try { await browser.close(); } catch {}
       return [];
     }
-
-    const full = await scrapeBranches(browser, branches);
-    return full;
   } catch (err) {
-    console.error(`[scraper] competitor scraping failed: ${err.message}`);
-    // Return whatever we have cached, if anything
-    if (fs.existsSync(config.COMP_REVIEWS)) {
-      try {
-        const cached = JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8"));
-        console.warn(`[scraper] returning ${cached.length} cached competitor branches from partial run`);
-        return cached;
-      } catch {}
-    }
-    return [];
-  } finally {
+    console.error(`[scraper] discovery failed: ${err.message}`);
     try { await browser.close(); } catch {}
+    return [];
   }
+
+  // Stage 2 with retry — if browser crashes, relaunch and continue
+  // (scrapeBranches saves progress per-branch, so a new browser picks up where it left off)
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const full = await scrapeBranches(browser, branches);
+      try { await browser.close(); } catch {}
+      return full;
+    } catch (err) {
+      console.error(`[scraper] Stage 2 attempt ${attempt}/${MAX_RETRIES} failed: ${err.message}`);
+      try { await browser.close(); } catch {}
+      if (attempt < MAX_RETRIES) {
+        console.log('[scraper] relaunching browser to continue Stage 2...');
+        try { browser = await launchBrowser(); } catch (e) {
+          console.error(`[scraper] browser relaunch failed: ${e.message}`);
+          break;
+        }
+      }
+    }
+  }
+
+  // All retries exhausted — return whatever we managed to scrape
+  if (fs.existsSync(config.COMP_REVIEWS)) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8"));
+      console.warn(`[scraper] returning ${cached.length} cached competitor branches after retries exhausted`);
+      return cached;
+    } catch {}
+  }
+  return [];
 }
 
 /**
@@ -556,4 +598,57 @@ async function scrapeBrand(brand) {
   }
 }
 
-module.exports = { scrapeCompetitors, scrapeBrand };
+/**
+ * Run ONLY Stage 2 (per-branch reviews + hours) on a pre-discovered branch
+ * list. Used when discovery is done authoritatively via the Google Places API
+ * (see places-fetcher.js) instead of the fragile Puppeteer feed scroll.
+ *
+ * `branches` items must carry at least { title, url, __searchBrand } and
+ * ideally { placeId, address, lat, lng, hours, phone, rating, reviewsCount }
+ * which are preserved when the page scrape doesn't surface them.
+ */
+async function scrapeProvidedBranches(branches) {
+  if (!Array.isArray(branches) || branches.length === 0) {
+    console.warn("[scraper] scrapeProvidedBranches: empty branch list");
+    return [];
+  }
+
+  // Fresh Stage 2 cache so a prior run never bleeds in.
+  if (fs.existsSync(config.COMP_REVIEWS)) {
+    try { fs.unlinkSync(config.COMP_REVIEWS); } catch {}
+  }
+  // Normalize: ensure each branch has a navigable url (prefer clean place_id URL)
+  const normalized = branches.map((b) => ({
+    ...b,
+    url: b.placeId
+      ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}`
+      : (b.url || b.addressLink || ""),
+  })).filter((b) => b.url);
+
+  let browser;
+  try { browser = await launchBrowser(); }
+  catch (err) { console.error(`[scraper] failed to launch browser: ${err.message}`); return normalized; }
+
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const full = await scrapeBranches(browser, normalized);
+      try { await browser.close(); } catch {}
+      return full;
+    } catch (err) {
+      console.error(`[scraper] provided-branches Stage 2 attempt ${attempt}/${MAX_RETRIES} failed: ${err.message}`);
+      try { await browser.close(); } catch {}
+      if (attempt < MAX_RETRIES) {
+        try { browser = await launchBrowser(); }
+        catch (e) { console.error(`[scraper] browser relaunch failed: ${e.message}`); break; }
+      }
+    }
+  }
+
+  if (fs.existsSync(config.COMP_REVIEWS)) {
+    try { return JSON.parse(fs.readFileSync(config.COMP_REVIEWS, "utf8")); } catch {}
+  }
+  return normalized;
+}
+
+module.exports = { scrapeCompetitors, scrapeBrand, scrapeProvidedBranches };

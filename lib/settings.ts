@@ -19,6 +19,12 @@ export interface AppSettings {
   gmb_oauth_client_id:        string;
   gmb_oauth_client_secret:    string;
 
+  // Google Places API (competitor discovery)
+  google_places_api_key:      string;
+
+  // Apify token (competitor reviews + star distribution + popular times)
+  apify_token:                string;
+
   // Worker
   worker_poll_ms:             number;
   puppeteer_headless:         boolean;
@@ -51,7 +57,9 @@ export async function getSettings(forceFresh = false): Promise<AppSettings> {
 
     gmb_oauth_client_id:        data?.gmb_oauth_client_id        || process.env.GMB_OAUTH_CLIENT_ID        || '',
     gmb_oauth_client_secret:    data?.gmb_oauth_client_secret    || process.env.GMB_OAUTH_CLIENT_SECRET    || '',
-    
+    google_places_api_key:      data?.google_places_api_key      || process.env.GOOGLE_PLACES_API_KEY      || '',
+    apify_token:                data?.apify_token                || process.env.APIFY_TOKEN                || '',
+
     worker_poll_ms:             data?.worker_poll_ms             ?? parseInt(process.env.WORKER_POLL_INTERVAL_MS || '5000', 10),
     puppeteer_headless:         data?.puppeteer_headless         ?? (process.env.PUPPETEER_HEADLESS !== 'false'),
     signup_allowed:             data?.signup_allowed             ?? true,

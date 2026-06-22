@@ -30,6 +30,14 @@ export interface JobConfig {
    *  Puppeteer fallback when the Business Profile API returns no data. */
   TARGET_SEARCH:  CompetitorEntry;
   COMPETITORS: CompetitorEntry[];
+  /** Google Places API key — when present, competitors are discovered via the
+   *  Places API (authoritative, place_id-keyed) instead of Puppeteer scroll. */
+  PLACES_API_KEY?: string;
+  /** Optional explicit city list for Places per-city fan-out. Defaults to the
+   *  built-in SA city list when searchLocation is Saudi Arabia. */
+  PLACES_CITIES?: string[];
+  /** Apify token — competitor reviews + star distribution + popular times. */
+  APIFY_TOKEN?: string;
   REVIEWS_OPTIONS: { maxReviews: number };
   LOOKBACK_MONTHS: number;
   /** Inclusive YYYY-MM-DD start of analysis window. If absent, analyzer uses LOOKBACK_MONTHS. */
@@ -40,7 +48,7 @@ export interface JobConfig {
     headless: boolean; maxScrollsStage1: number; maxScrollsStage2: number;
     scrollPauseMs: number; betweenBranchesMs: number;
   };
-  POPULAR_TIMES_OPTIONS: { enableHoverFallback: boolean };
+  POPULAR_TIMES_OPTIONS: { enableHoverFallback: boolean; concurrency?: number };
   TARGET_CACHE: string;
   COMP_BRANCHES: string;
   COMP_REVIEWS: string;
@@ -124,7 +132,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       clientId:     settings.gmb_oauth_client_id,
       clientSecret: settings.gmb_oauth_client_secret,
       refreshToken: args.refreshToken,
-      readMask:     'name,title,storeCode,storefrontAddress,regularHours,phoneNumbers,websiteUri,metadata',
+      readMask:     'name,title,storeCode,storefrontAddress,regularHours,phoneNumbers,websiteUri,metadata,openInfo',
     },
     TARGET_SEARCH: {
       key:  cleanTarget,
@@ -132,6 +140,8 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       url:  `https://www.google.com/maps/search/${encodeURIComponent(buildQuery(cleanTarget))}/?hl=en`,
     },
     COMPETITORS: competitorEntries,
+    PLACES_API_KEY: settings.google_places_api_key || undefined,
+    APIFY_TOKEN: settings.apify_token || undefined,
     REVIEWS_OPTIONS: { maxReviews: 100 },
     LOOKBACK_MONTHS: 3,
     DATE_START:      args.dateStart,
@@ -143,7 +153,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
       scrollPauseMs:      1500,
       betweenBranchesMs:  1500,
     },
-    POPULAR_TIMES_OPTIONS: { enableHoverFallback: true },
+    POPULAR_TIMES_OPTIONS: { enableHoverFallback: true, concurrency: 6 },
     TARGET_CACHE:   path.join(workDir, 'target_locations.json'),
     COMP_BRANCHES:  path.join(workDir, 'competitor_branches.json'),
     COMP_REVIEWS:   path.join(workDir, 'competitor_reviews.json'),

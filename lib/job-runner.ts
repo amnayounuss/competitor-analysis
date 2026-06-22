@@ -22,6 +22,8 @@ import { getClientAnthropicKey } from './client-db';
 import {
   fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
   scrapeBrand, scrapePopularTimes, analyze, writeWorkbook, writeReport,
+  fetchCompetitorsViaPlaces, scrapeReviewsForBranches, enrichRatingsViaPlaces,
+  enrichBranchesViaApify,
 } from '../scrapers';
 
 export async function runJob(job: Job): Promise<void> {
@@ -93,15 +95,25 @@ export async function runJob(job: Job): Promise<void> {
     await setProgress(10, 'Stage A: target API');
     let target: any[] = [];
     let apiPathWorked = false;
-    try {
-      target = await fetchTarget(cfg, checkCancellation);
-      if (target.length > 0) {
-        fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+    // The GMB OAuth token refresh / API occasionally fails transiently. Since
+    // the target brand MUST come authoritatively from GMB (the Puppeteer
+    // fallback only finds ~20 and scrapes reviews), retry a few times before
+    // giving up to the fallback.
+    const GMB_RETRIES = 3;
+    for (let attempt = 1; attempt <= GMB_RETRIES; attempt++) {
+      try {
+        target = await fetchTarget(cfg, checkCancellation);
+        if (target.length > 0) {
+          fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+          apiPathWorked = true;
+          await log('info', `Stage A — ${target.length} target branches (API, attempt ${attempt})`);
+          break;
+        }
+        await log('warn', `Stage A — GMB API returned 0 branches (attempt ${attempt}/${GMB_RETRIES})`);
+      } catch (err: any) {
+        await log('warn', `Stage A API failed (attempt ${attempt}/${GMB_RETRIES}): ${err.message || err?.toString() || 'unknown error'}`);
       }
-      apiPathWorked = target.length > 0;
-      await log('info', `Stage A — ${target.length} target branches (API)`);
-    } catch (err: any) {
-      await log('warn', `Stage A API failed: ${err.message} — will try Puppeteer fallback`);
+      if (attempt < GMB_RETRIES) await new Promise(r => setTimeout(r, 3000 * attempt));
     }
 
     // ── Stage A2 — Puppeteer fallback for target when API gave nothing ──
@@ -119,98 +131,137 @@ export async function runJob(job: Job): Promise<void> {
       }
     }
 
-    // ── Stage B — target hours (only meaningful when API path was used) ──
-    if (target.length > 0) {
+    // ── Stage B — target Google rating + review count via Places API ──
+    // Hours already come from GMB regularHours (no Puppeteer needed). We only
+    // need each branch's Google average rating + total review count, which the
+    // GMB API doesn't expose — fetch them from the Places API by placeId.
+    if (target.length > 0 && apiPathWorked) {
       await checkCancellation();
-      await setProgress(25, 'Stage B: target hours');
-      if (apiPathWorked) {
+      await setProgress(25, 'Stage B: target ratings via Places API');
+      if (cfg.PLACES_API_KEY) {
+        try {
+          target = await enrichRatingsViaPlaces(target, cfg, checkCancellation);
+          fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
+          const withRating = target.filter((t: any) => t.rating != null).length;
+          await log('info', `Stage B — ratings filled for ${withRating}/${target.length} target branches`);
+        } catch (err: any) { await log('warn', `Stage B ratings failed: ${err.message} — continuing without ratings`); }
+      } else {
+        // No Places key: fall back to Puppeteer hours+rating scrape (legacy).
         try {
           target = await scrapeHoursForTarget(target, cfg, checkCancellation);
           fs.writeFileSync(cfg.TARGET_CACHE, JSON.stringify(target, null, 2));
-          await log('info', `Stage B — hours scraped for ${target.length} branches`);
-        } catch (err: any) { await log('warn', `Stage B hours failed: ${err.message} — continuing without hours`); }
-      } else {
-        await log('info', 'Stage B skipped — Puppeteer fallback already collected hours');
+          await log('info', `Stage B — hours/ratings scraped via Puppeteer for ${target.length} branches`);
+        } catch (err: any) { await log('warn', `Stage B Puppeteer fallback failed: ${err.message}`); }
       }
     }
 
-    // ── Stage C — AI-expanded search + competitors ──
+    // ── Stage C — competitor discovery + reviews ──
     await checkCancellation();
     const anthropicKey = await getClientAnthropicKey(job.user_id);
-    if (anthropicKey && cfg.searchLocation) {
-      await setProgress(40, 'AI: expanding search queries for full coverage');
-      try {
-        const parsedComps = cfg.COMPETITORS.reduce((acc: Array<{brand: string; aliases: string[]}>, c) => {
-          const existing = acc.find(a => a.brand === c.key);
-          if (existing) { if (!existing.aliases.includes(c.name)) existing.aliases.push(c.name); }
-          else acc.push({ brand: c.key, aliases: [c.name] });
-          return acc;
-        }, []);
+    let competitors: any[] = [];
 
-        const aiQueries = await expandSearchQueries(parsedComps, cfg.searchLocation, anthropicKey);
-        const existingUrls = new Set(cfg.COMPETITORS.map(c => c.url));
-        let added = 0;
-        for (const q of aiQueries) {
-          const url = `https://www.google.com/maps/search/${encodeURIComponent(q.query)}/?hl=en`;
-          if (!existingUrls.has(url)) {
-            cfg.COMPETITORS.push({ key: q.brand, name: q.query, url });
-            existingUrls.add(url);
-            added++;
-          }
+    // Preferred path: authoritative discovery via the Google Places API
+    // (place_id-keyed, country-filtered, closed branches dropped, self-updating).
+    if (cfg.PLACES_API_KEY) {
+      try {
+        await setProgress(40, 'Stage C: discovering competitors via Google Places API');
+        let discovered = await fetchCompetitorsViaPlaces(cfg, checkCancellation);
+        await log('info', `Places API — ${discovered.length} competitor branches discovered`);
+
+        // AI chain verification — drop businesses that merely share a word.
+        if (discovered.length > 0 && anthropicKey) {
+          await setProgress(48, 'AI: verifying competitor branches');
+          discovered = await verifyCompetitorsWithAI(discovered, job.competitors, anthropicKey, log);
         }
-        await log('info', `AI search expansion: ${aiQueries.length} queries generated, ${added} new searches added (${cfg.COMPETITORS.length} total)`);
+
+        // No review scraping — the Places branches already carry Google's
+        // average rating + total review count, hours, phone, website and the
+        // ChIJ placeId. Use them directly (popular times added in Stage D).
+        competitors = discovered;
+        await log('info', `Stage C — ${competitors.length} verified competitor branches (rating + count from Places, no review scraping)`);
       } catch (err: any) {
-        await log('warn', `AI search expansion failed: ${err.message} — using original queries`);
+        await log('warn', `Places discovery path failed: ${err.message} — falling back to Puppeteer discovery`);
       }
     }
 
-    await checkCancellation();
-    await setProgress(45, 'Stage C: competitors');
-    let competitors: any[] = [];
-    try {
-      competitors = await scrapeCompetitors(cfg, checkCancellation);
-      await log('info', `Stage C — ${competitors.length} competitor branches`);
-    } catch (err: any) {
-      await log('warn', `Stage C failed: ${err.message} — continuing with target data only`);
-    }
+    // Fallback path: legacy Puppeteer feed-scroll discovery (used when no
+    // Places key is configured or Places returned nothing).
+    if (competitors.length === 0) {
+      if (anthropicKey && cfg.searchLocation && !cfg.PLACES_API_KEY) {
+        await setProgress(40, 'AI: expanding search queries for full coverage');
+        try {
+          const parsedComps = cfg.COMPETITORS.reduce((acc: Array<{brand: string; aliases: string[]}>, c) => {
+            const existing = acc.find(a => a.brand === c.key);
+            if (existing) { if (!existing.aliases.includes(c.name)) existing.aliases.push(c.name); }
+            else acc.push({ brand: c.key, aliases: [c.name] });
+            return acc;
+          }, []);
+          const aiQueries = await expandSearchQueries(parsedComps, cfg.searchLocation, anthropicKey);
+          const existingUrls = new Set(cfg.COMPETITORS.map(c => c.url));
+          let added = 0;
+          for (const q of aiQueries) {
+            const url = `https://www.google.com/maps/search/${encodeURIComponent(q.query)}/?hl=en`;
+            if (!existingUrls.has(url)) {
+              cfg.COMPETITORS.push({ key: q.brand, name: q.query, url });
+              existingUrls.add(url);
+              added++;
+            }
+          }
+          await log('info', `AI search expansion: ${aiQueries.length} queries generated, ${added} new searches added (${cfg.COMPETITORS.length} total)`);
+        } catch (err: any) {
+          await log('warn', `AI search expansion failed: ${err.message} — using original queries`);
+        }
+      }
 
-    // ── AI chain verification — filter false positives from competitor discovery ──
-    if (competitors.length > 0 && anthropicKey) {
+      await checkCancellation();
+      await setProgress(45, 'Stage C: competitors');
       try {
-        await setProgress(50, 'AI: verifying competitor branches');
-        // Use the original pipe-separated competitor strings for real brand aliases
-        const parsedComps = job.competitors.map(raw => {
-          const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
-          return { brand: parts[0], aliases: parts };
-        });
+        competitors = await scrapeCompetitors(cfg, checkCancellation);
+        await log('info', `Stage C — ${competitors.length} competitor branches`);
 
-        for (const comp of parsedComps) {
-          const compPlaces = competitors.filter(p => {
-            const sb = (p.__searchBrand || '').toLowerCase();
-            return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
-          });
-          if (compPlaces.length === 0) continue;
-
-          const titles = compPlaces.map(p => p.title || '');
-          const uniqueTitles = Array.from(new Set(titles));
-          const validIndices = await verifyChainBranches(comp.brand, comp.aliases, uniqueTitles, anthropicKey);
-          const validTitles = new Set(uniqueTitles.filter((_, i) => validIndices.has(i)));
-
-          const before = compPlaces.length;
-          competitors = competitors.filter(p => {
-            const sb = (p.__searchBrand || '').toLowerCase();
-            const isThisComp = sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
-            if (!isThisComp) return true;
-            return validTitles.has(p.title);
-          });
-          const removed = before - competitors.filter(p => {
-            const sb = (p.__searchBrand || '').toLowerCase();
-            return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
-          }).length;
-          await log('info', `AI verification for "${comp.brand}": ${removed} false positives removed (${before} → ${before - removed})`);
+        if (competitors.length > 0 && anthropicKey) {
+          await setProgress(50, 'AI: verifying competitor branches');
+          competitors = await verifyCompetitorsWithAI(competitors, job.competitors, anthropicKey, log);
         }
       } catch (err: any) {
-        await log('warn', `AI chain verification failed: ${err.message} — keeping all discovered branches`);
+        await log('warn', `Stage C failed: ${err.message} — continuing with target data only`);
+      }
+    }
+
+    // ── Region filter + coordinate/place_id dedup (both paths) ──
+    if (job.search_location && competitors.length > 0) {
+      const before = competitors.length;
+      competitors = filterByRegion(competitors, job.search_location);
+      const removed = before - competitors.length;
+      if (removed > 0) await log('info', `Region filter: ${removed} branches outside "${job.search_location}" removed (${before} → ${competitors.length})`);
+    }
+    if (competitors.length > 0) {
+      const before = competitors.length;
+      competitors = deduplicateByLocation(competitors);
+      const removed = before - competitors.length;
+      if (removed > 0) await log('info', `Location dedup: ${removed} duplicate locations removed (${before} → ${competitors.length})`);
+    }
+
+    // ── Stage C2 — Apify: competitor reviews (date-windowed) + star
+    //    distribution + popular times. Google has no public reviews API for
+    //    places we don't own, so this third-party source powers the
+    //    rating-distribution and review-trend sections for competitors. ──
+    const reviewsStartDate = job.date_start
+      || new Date(Date.now() - (cfg.LOOKBACK_MONTHS || 3) * 31 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    if (cfg.APIFY_TOKEN && competitors.length > 0) {
+      await checkCancellation();
+      await setProgress(58, 'Stage C: competitor reviews + popular times (Apify)');
+      try {
+        competitors = await enrichBranchesViaApify(
+          competitors,
+          { maxReviews: 200, reviewsStartDate, fillRating: true },
+          cfg, checkCancellation,
+        );
+        const withRev = competitors.filter((c: any) => (c.reviews?.length || 0) > 0).length;
+        const withPt  = competitors.filter((c: any) => c.popularTimes?.available).length;
+        await log('info', `Apify — competitor data: ${withRev}/${competitors.length} with reviews, ${withPt}/${competitors.length} with popular times`);
+      } catch (err: any) {
+        await log('warn', `Apify competitor fetch failed: ${err.message} — competitors will lack reviews/popular times`);
       }
     }
 
@@ -226,10 +277,24 @@ export async function runJob(job: Job): Promise<void> {
     await log('info', `Merged: ${target.length} target + ${competitors.length} competitor = ${rawPlaces.length} branches`);
 
     // ── Stage D — popular times (optional, non-fatal) ──
+    // Prefer Apify (reliable per-day data). The old Puppeteer hover scraper
+    // produced broken per-day data (every branch wrongly peaked on Sunday), so
+    // it's only a last-resort fallback when no Apify token is configured.
+    // Competitors already got popular times in Stage C2; here we fill the rest
+    // (the target/Anoosh branches).
     await checkCancellation();
     await setProgress(65, 'Stage D: popular times');
     try {
-      rawPlaces = await scrapePopularTimes(rawPlaces, cfg, checkCancellation);
+      if (cfg.APIFY_TOKEN) {
+        const needPT = rawPlaces.filter(p => p.placeId && !p.popularTimes);
+        if (needPT.length > 0) {
+          await enrichBranchesViaApify(needPT, { maxReviews: 0 }, cfg, checkCancellation);
+        }
+        const withPt = rawPlaces.filter(p => p.popularTimes?.available).length;
+        await log('info', `Stage D — popular times via Apify: ${withPt}/${rawPlaces.length} branches`);
+      } else {
+        rawPlaces = await scrapePopularTimes(rawPlaces, cfg, checkCancellation);
+      }
       fs.writeFileSync(cfg.RAW_JSON_FILE, JSON.stringify(rawPlaces, null, 2));
     } catch (err: any) { await log('warn', `Stage D failed: ${err.message} — popular times will show N/A`); }
 
@@ -321,6 +386,11 @@ export async function runJob(job: Job): Promise<void> {
 
     // ── Email ──
     const reviewsTotal = rawPlaces.reduce((s, p) => s + (p.reviews?.length || 0), 0);
+    // Allow suppressing the client report email (e.g. for data-correction
+    // re-runs) without disabling the rest of the pipeline.
+    if (process.env.SUPPRESS_REPORT_EMAIL === 'true') {
+      await log('info', 'Report email suppressed (SUPPRESS_REPORT_EMAIL=true)');
+    } else {
     try {
       await setProgress(96, 'Sending email');
       await sendReportEmail({
@@ -340,6 +410,7 @@ export async function runJob(job: Job): Promise<void> {
       });
     } catch (emailErr: any) {
       await log('warn', `Email failed to send: ${emailErr.message}. You can still download the report from the dashboard.`);
+    }
     }
 
     // ── Mirror history to client DB ──
@@ -399,6 +470,47 @@ export async function runJob(job: Job): Promise<void> {
 //  Helpers
 // ──────────────────────────────────────────────────────────────
 
+/** AI chain verification — for each competitor brand, ask Claude which of the
+ *  discovered titles are genuine branches of that chain and drop the rest
+ *  (businesses that merely share a word). Shared by both discovery paths. */
+async function verifyCompetitorsWithAI(
+  competitors: any[],
+  jobCompetitors: string[],
+  anthropicKey: string,
+  log: (level: 'info' | 'warn' | 'error', message: string) => Promise<void>,
+): Promise<any[]> {
+  const parsedComps = jobCompetitors.map(raw => {
+    const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+    return { brand: parts[0], aliases: parts };
+  });
+
+  let result = competitors;
+  for (const comp of parsedComps) {
+    const isThisComp = (p: any) => {
+      const sb = (p.__searchBrand || '').toLowerCase();
+      return sb === comp.brand.toLowerCase() || comp.aliases.some(a => sb.includes(a.toLowerCase()));
+    };
+    const compPlaces = result.filter(isThisComp);
+    if (compPlaces.length === 0) continue;
+
+    const uniqueTitles = Array.from(new Set(compPlaces.map(p => p.title || '')));
+    let validTitles: Set<string>;
+    try {
+      const validIndices = await verifyChainBranches(comp.brand, comp.aliases, uniqueTitles, anthropicKey);
+      validTitles = new Set(uniqueTitles.filter((_, i) => validIndices.has(i)));
+    } catch (err: any) {
+      await log('warn', `AI verification for "${comp.brand}" failed: ${err.message} — keeping all`);
+      continue;
+    }
+
+    const before = compPlaces.length;
+    result = result.filter(p => (isThisComp(p) ? validTitles.has(p.title) : true));
+    const after = result.filter(isThisComp).length;
+    await log('info', `AI verification for "${comp.brand}": ${before - after} false positives removed (${before} → ${after})`);
+  }
+  return result;
+}
+
 async function pushDataToClientDb(
   cdb: any,
   jobId: string,
@@ -423,16 +535,18 @@ async function pushDataToClientDb(
     return Number((valid.reduce((s, n) => s + n, 0) / valid.length).toFixed(2));
   };
 
-  // Deduplicate raw places by placeId (same physical location may appear
-  // multiple times from different search queries with varying transliterations)
-  const dedupedPlaces: typeof rawPlaces = [];
-  const seenPlaceIds = new Set<string>();
-  for (const p of rawPlaces) {
-    const pid = p.placeId || p.place_id;
-    if (pid && seenPlaceIds.has(pid)) continue;
-    if (pid) seenPlaceIds.add(pid);
-    dedupedPlaces.push(p);
-  }
+  // Target brand entries come from the authoritative GBP API — don't dedup them.
+  // Only dedup competitor entries (from Puppeteer scraping which can find duplicates).
+  const isTarget = (p: any) => (p.__searchBrand || '').toLowerCase() === job.target_name.toLowerCase();
+  const targetEntries = rawPlaces.filter(isTarget);
+  const competitorEntries = rawPlaces.filter(p => !isTarget(p));
+  const dedupedCompetitors = deduplicateByLocation(competitorEntries);
+  // Drop competitor-scraped entries classified as the target brand — they're
+  // duplicates of what GBP already provides authoritatively.
+  const targetLower = job.target_name.toLowerCase();
+  const filteredCompetitors = dedupedCompetitors.filter(p => detectBrand(p).toLowerCase() !== targetLower);
+  const dedupedPlaces = [...targetEntries, ...filteredCompetitors];
+  console.log(`[dedup] rawPlaces=${rawPlaces.length} targetEntries=${targetEntries.length} competitorEntries=${competitorEntries.length} dedupedComp=${dedupedCompetitors.length} filteredComp=${filteredCompetitors.length} dedupedPlaces=${dedupedPlaces.length}`);
 
   const branchRows = dedupedPlaces.map(p => ({
     job_id: jobId,
@@ -451,11 +565,13 @@ async function pushDataToClientDb(
   }));
 
   // Clean up stale data from previous runs of the same job
+  await cdb.from('branch_analytics').delete().eq('job_id', jobId);
+  await cdb.from('analyses').delete().eq('job_id', jobId);
   await cdb.from('reviews').delete().eq('job_id', jobId);
   await cdb.from('branches').delete().eq('job_id', jobId);
 
   let { data: insertedBranches, error: branchErr } = await cdb
-    .from('branches').insert(branchRows).select('id, branch_name, brand');
+    .from('branches').insert(branchRows).select('id, branch_name, brand, place_id');
   if (branchErr?.message?.includes('place_id')) {
     const rowsNoPid = branchRows.map(({ place_id, ...rest }) => rest);
     ({ data: insertedBranches, error: branchErr } = await cdb
@@ -463,15 +579,22 @@ async function pushDataToClientDb(
   }
   if (branchErr) throw new Error('Failed inserting branches: ' + branchErr.message);
 
-  const branchIdByKey = new Map<string, string>();
+  // Link analytics/reviews back to branches. place_id is the unique key; the
+  // brand|name key is a fallback only (AI-generated branch names collide, e.g.
+  // four "King Fahd Road" branches in different cities → never key by name).
+  const branchIdByPid = new Map<string, string>();
+  const branchIdByName = new Map<string, string>();
   for (const b of insertedBranches || []) {
-    branchIdByKey.set(`${b.brand}|${b.branch_name}`, b.id);
+    if (b.place_id) branchIdByPid.set(b.place_id, b.id);
+    if (!branchIdByName.has(`${b.brand}|${b.branch_name}`)) branchIdByName.set(`${b.brand}|${b.branch_name}`, b.id);
   }
+  const branchIdFor = (brand: string, name: string, placeId?: string | null): string | undefined =>
+    (placeId && branchIdByPid.get(placeId)) || branchIdByName.get(`${brand}|${name}`);
 
   // Reviews — flatten across all places
   const reviewRows: any[] = [];
   for (const p of rawPlaces) {
-    const branchId = branchIdByKey.get(`${detectBrand(p)}|${p.title}`);
+    const branchId = branchIdFor(detectBrand(p), p.title, p.placeId || p.place_id);
     for (const r of p.reviews || []) {
       reviewRows.push({
         job_id: jobId,
@@ -523,14 +646,26 @@ async function pushDataToClientDb(
   // ── Branch analytics (mirrors Excel "Branch Wise Data" sheet) ──
   if (analysis?.branchRows?.length > 0) {
     const placeByName = new Map<string, any>();
-    for (const p of dedupedPlaces) placeByName.set(p.title, p);
+    const placeByPid = new Map<string, any>();
+    for (const p of dedupedPlaces) {
+      placeByName.set(p.title, p);
+      const pid = p.placeId || p.place_id;
+      if (pid) placeByPid.set(pid, p);
+    }
 
-    const analyticsRows = analysis.branchRows.map((r: any) => {
+    // analysis.branchRows is 1:1 with rawPlaces — keep only indices that survived dedup
+    const dedupedSet = new Set(dedupedPlaces);
+    const filteredBranchRows = analysis.branchRows.filter((_: any, i: number) => dedupedSet.has(rawPlaces[i]));
+    const anooshAnalytics = filteredBranchRows.filter((r: any) => r.brand === job.target_name);
+    console.log(`[dedup] analysis.branchRows=${analysis.branchRows.length} filteredBranchRows=${filteredBranchRows.length} anooshInFiltered=${anooshAnalytics.length}`);
+
+    const analyticsRows = filteredBranchRows.map((r: any) => {
       const pt   = r.popularTimes || {};
       const peak = pt.available
         ? `${pt.peakDay || ''} ${pt.peakHour || ''}${pt.peakBusyness != null ? ` (${pt.peakBusyness}%)` : ''}`.trim()
         : null;
-      const place = placeByName.get(r.branchName);
+      // Prefer place_id linkage (unique); name lookup collides on AI-duplicate names.
+      const place = (r.placeId && placeByPid.get(r.placeId)) || placeByName.get(r.branchName);
       const mapsLink = r.addressLink || place?.addressLink || place?.url || null;
 
       // business_hours: flatten {Mon:"7AM-12AM",...} to pipe-separated string
@@ -543,7 +678,7 @@ async function pushDataToClientDb(
 
       return {
         job_id: jobId,
-        branch_id: branchIdByKey.get(`${r.brand}|${r.branchName}`) || null,
+        branch_id: branchIdFor(r.brand, r.branchName, r.placeId) || null,
         brand: r.brand,
         branch_name: r.branchName,
         city: r.city || null,
@@ -572,7 +707,7 @@ async function pushDataToClientDb(
         popular_times_grid: pt.grid || null,
         date_start: window.dateStart,
         date_end:   window.dateEnd,
-        place_id: place?.placeId || place?.place_id || null,
+        place_id: r.placeId || place?.placeId || place?.place_id || null,
       };
     });
 
@@ -657,6 +792,7 @@ function makeBrandDetector(target: string, competitors: string[]) {
     const t = (p?.title || '').toLowerCase().trim();
     if (t.includes(targetLower)) return target;
     if (p?.__searchBrand === target) return target;
+    if (p?.__searchBrand && brandAliases.has(p.__searchBrand)) return p.__searchBrand;
     let found: string | null = null;
     brandAliases.forEach((aliases, brand) => {
       if (!found && titleMatchesBrand(p?.title || '', aliases)) { found = brand; }
@@ -670,4 +806,92 @@ function extractCity(addr?: string): string | null {
   if (!addr) return null;
   const parts = addr.split(',').map(s => s.trim());
   return parts.length >= 2 ? parts[parts.length - 2] : null;
+}
+
+const REGION_CITIES: Record<string, Set<string>> = {
+  'saudi arabia': new Set([
+    'riyadh','jeddah','makkah','mecca','madinah','medina','dammam','al khobar','khobar',
+    'dhahran','tabuk','abha','taif','hail','ha\'il','najran','yanbu','al jubail','jubail',
+    'buraydah','buraidah','khamis mushait','khamis mushayit','al hofuf','hofuf','al kharj',
+    'sakaka','jazan','jizan','al bahah','hafar al batin','unaizah','al majmaah','al mubarraz',
+    'al qatif','ras tanura','al zulfi','dawadmi','al duwadimi','shaqra','wadi ad dawasir',
+    'al aflaj','layla','al uyun','al lith','rabigh','al qunfudhah','bisha','muhayil',
+    'ar rass','al bukayriyah','al mithnab','arar','turaif','rafha','al khafji',
+    'al namas','baljurashi','al makhwah','al aqiq','qilwah','sarat abidah',
+  ]),
+  'uae': new Set([
+    'dubai','abu dhabi','sharjah','ajman','ras al khaimah','fujairah','al ain','umm al quwain',
+  ]),
+  'united arab emirates': new Set([
+    'dubai','abu dhabi','sharjah','ajman','ras al khaimah','fujairah','al ain','umm al quwain',
+  ]),
+  'bahrain': new Set(['manama','riffa','muharraq','isa town','hamad town','sitra']),
+  'kuwait': new Set(['kuwait city','hawalli','salmiya','jahra','farwaniya','ahmadi']),
+  'qatar': new Set(['doha','al wakrah','al khor','al rayyan','umm salal']),
+  'oman': new Set(['muscat','salalah','sohar','nizwa','sur','ibri']),
+};
+
+function filterByRegion(places: any[], searchLocation: string): any[] {
+  const loc = searchLocation.toLowerCase().trim();
+  let allowedCities: Set<string> | null = null;
+  for (const [region, cities] of Object.entries(REGION_CITIES)) {
+    if (loc.includes(region)) { allowedCities = cities; break; }
+  }
+  if (!allowedCities) return places;
+
+  return places.filter(p => {
+    const addr = (p.address || '').toLowerCase();
+    const city = (p.city || '').toLowerCase();
+    // Allow if any known city appears in address or city field
+    const cities = Array.from(allowedCities!);
+    for (const c of cities) {
+      if (addr.includes(c) || city.includes(c)) return true;
+    }
+    // Also allow if address contains the country name directly
+    if (addr.includes(loc)) return true;
+    // If no address at all, keep it (can't determine region)
+    if (!p.address && !p.city) return true;
+    return false;
+  });
+}
+
+function deduplicateByLocation(places: any[]): any[] {
+  const result: any[] = [];
+  const seenPids = new Set<string>();
+  const seenCoords = new Set<string>();
+  const seenUrlBase = new Set<string>();
+
+  for (const p of places) {
+    const pid = p.placeId || p.place_id;
+    // place_id is the authoritative identity. When present, dedup ONLY by it —
+    // never fall through to the weaker coord/URL keys, because Places-sourced
+    // URLs look like ".../maps/place/?q=place_id:X" whose base (before "?") is
+    // identical for every branch and would otherwise collapse them all to one.
+    if (pid) {
+      if (seenPids.has(pid)) continue;
+      seenPids.add(pid);
+      result.push(p);
+      continue;
+    }
+
+    // No place_id → fall back to coordinate dedup (round to ~110m precision)…
+    if (p.lat != null && p.lng != null) {
+      const coordKey = `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`;
+      if (seenCoords.has(coordKey)) continue;
+      seenCoords.add(coordKey);
+    }
+
+    // …and URL-base dedup, but only for real /maps/place/<slug> URLs (skip the
+    // query-only place_id URLs whose base is non-distinguishing).
+    const rawUrl = p.url || '';
+    const urlBase = rawUrl.split('?')[0];
+    const isPlaceIdQueryUrl = /\/maps\/place\/?$/.test(urlBase) && rawUrl.includes('q=place_id:');
+    if (urlBase && !isPlaceIdQueryUrl) {
+      if (seenUrlBase.has(urlBase)) continue;
+      seenUrlBase.add(urlBase);
+    }
+
+    result.push(p);
+  }
+  return result;
 }

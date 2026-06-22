@@ -127,9 +127,15 @@ Your task: identify which titles are ACTUAL branches/stores of the "${brand}" ch
 
 Rules:
 - The brand "${brand}" is a chain with aliases: ${aliases.join(', ')}
-- A title IS a branch if it's clearly the same brand (exact name, bilingual variant, or name + standard suffix like "Sweets", "Chocolate", "Cafe")
-- A title is NOT a branch if it's a different business that contains a similar word (e.g. "Bread & Tawa" is NOT "Tawa Sweets", "تاوة زمان" is NOT "تاوة")
-- When uncertain, lean toward EXCLUDING — false negatives are better than false positives
+- A title IS a branch ONLY if it is clearly the SAME chain/brand (exact name match, bilingual variant of the same brand, or the brand name + a standard category suffix like "Sweets", "Chocolate", "Cafe")
+- EXCLUDE all of the following:
+  - Different businesses that merely contain a similar word (e.g. "Jar and Tawa restaurant" is NOT "Tawa Sweets")
+  - Spin-off or unrelated brands with the word embedded (e.g. "تاوة زمان", "احلى تاوة", "بيت التاوة", "قرص تاوة", "لقيمات وتاوة" are NOT "${brand}")
+  - Hotels, restaurants, geographic locations, or non-business entries (e.g. "Dar Al-Taqwa Hotel", "Al Majmaah, Saudi Arabia")
+  - Factory/manufacturing entries unless the brand itself is a factory (e.g. "مصنع حلويات تاوه")
+  - Entries that don't match ANY known alias of the brand
+- When uncertain, EXCLUDE — false negatives are better than false positives
+- Be STRICT: only include titles that are clearly actual retail/store branches of the "${brand}" chain
 
 Output a JSON array of the 0-based indices of titles that ARE real branches, inside a \`\`\`json\`\`\` block. Example: \`\`\`json\n[0, 2, 5]\n\`\`\``;
 

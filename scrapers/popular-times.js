@@ -411,74 +411,88 @@ async function scrapePopularTimes(allBranches, cacheFilePath) {
   });
 
   let stats = { fast: 0, slow: 0, failed: 0 };
+  const BRANCH_TIMEOUT_MS = 60000; // hard ceiling per branch so one hang can't stall the job
+  const POOL = Math.max(1, config.POPULAR_TIMES_OPTIONS.concurrency || 6);
 
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-    );
-
-    for (let i = 0; i < allBranches.length; i++) {
-      const b = allBranches[i];
-      if (b.popularTimes && b.popularTimes.available !== undefined) continue;
-
-      // Check cancellation between branches
-      await config.__check();
-
-      const short = (b.title || "").slice(0, 40);
-      process.stdout.write(`  [${i + 1}/${allBranches.length}] ${short} ... `);
-
-      // Verify URL before navigating
-      const navUrl = b.placeId ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}` : b.url;
-      if (!navUrl) {
-        console.log("✗ (missing URL)");
-        b.popularTimes = { available: false, grid: {}, summary: "" };
-        stats.failed++;
-        continue;
-      }
-
-      // Try fast only first (cheap)
-      try {
-        await page.goto(navUrl, { waitUntil: "networkidle2", timeout: 60000 });
-        await sleep(2500);
-        await dismissConsent(page);
-      } catch (navErr) {
-        console.log(`✗ (nav failed: ${navErr.message})`);
-        b.popularTimes = { available: false, grid: {}, summary: "" };
-        stats.failed++;
-        continue;
-      }
+  // Process one branch on a dedicated page. Never throws (returns on failure).
+  async function processBranch(page, b, label) {
+    const hasProperPlaceId = b.placeId && b.placeId.startsWith('ChIJ');
+    const navUrl = hasProperPlaceId ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}` : b.url;
+    if (!navUrl) {
+      b.popularTimes = { available: false, grid: {}, summary: "" };
+      stats.failed++; console.log(`  ${label} ✗ (missing URL)`); return;
+    }
+    try {
+      await page.goto(navUrl, { waitUntil: "networkidle2", timeout: 45000 });
+      await sleep(2000);
+      await dismissConsent(page);
 
       let grid = await extractViaHtmlParse(page);
       let method = "fast";
-
       if (!grid && config.POPULAR_TIMES_OPTIONS.enableHoverFallback) {
         grid = await extractViaHover(page);
         method = "slow";
       }
-
       if (grid) {
         b.popularTimes = summarizeGrid(grid) || { available: false, grid: {}, summary: "" };
         if (b.popularTimes.available) {
           stats[method]++;
-          console.log(`✓ [${method}] peak: ${b.popularTimes.peakDay} ${b.popularTimes.peakHour} (${b.popularTimes.peakBusyness}%)`);
-        } else {
-          stats.failed++;
-          console.log("✗ (no data)");
-        }
+          console.log(`  ${label} ✓ [${method}] peak: ${b.popularTimes.peakDay} ${b.popularTimes.peakHour} (${b.popularTimes.peakBusyness}%)`);
+        } else { stats.failed++; console.log(`  ${label} ✗ (no data)`); }
       } else {
         b.popularTimes = { available: false, grid: {}, summary: "" };
-        stats.failed++;
-        console.log("✗ (not available)");
+        stats.failed++; console.log(`  ${label} ✗ (not available)`);
       }
-
-      // Crash-safe: write progress after every branch
-      if (cacheFilePath) {
-        fs.writeFileSync(cacheFilePath, JSON.stringify(allBranches, null, 2));
-      }
-
-      await sleep(config.PUPPETEER_OPTIONS.betweenBranchesMs);
+    } catch (err) {
+      b.popularTimes = { available: false, grid: {}, summary: "" };
+      stats.failed++; console.log(`  ${label} ✗ (${(err.message || 'error').slice(0, 40)})`);
     }
+  }
+
+  // Worklist = branches still needing popular times, in order.
+  const work = [];
+  for (let i = 0; i < allBranches.length; i++) {
+    const b = allBranches[i];
+    if (b.popularTimes && b.popularTimes.available !== undefined) continue;
+    work.push({ b, i });
+  }
+
+  let cursor = 0;
+  let completed = 0;
+  // A pool of workers, each owning its own page, pulling from the shared cursor.
+  async function worker(slot) {
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+    try {
+      while (true) {
+        await config.__check();                 // cancellation between branches
+        const idx = cursor++;
+        if (idx >= work.length) break;
+        const { b, i } = work[idx];
+        const label = `[${i + 1}/${allBranches.length}]`;
+        // Hard timeout guard so a hung navigation can't stall the whole job.
+        await Promise.race([
+          processBranch(page, b, label),
+          new Promise((res) => setTimeout(() => {
+            if (!b.popularTimes) { b.popularTimes = { available: false, grid: {}, summary: "" }; stats.failed++; console.log(`  ${label} ✗ (timeout)`); }
+            res();
+          }, BRANCH_TIMEOUT_MS)),
+        ]);
+        completed++;
+        // Crash-safe: write progress periodically (every ~5 branches).
+        if (cacheFilePath && completed % 5 === 0) {
+          try { fs.writeFileSync(cacheFilePath, JSON.stringify(allBranches, null, 2)); } catch {}
+        }
+      }
+    } finally {
+      try { await page.close(); } catch {}
+    }
+  }
+
+  try {
+    console.log(`[popular-times] running ${work.length} branches with ${POOL} parallel workers`);
+    await Promise.all(Array.from({ length: Math.min(POOL, work.length || 1) }, (_, s) => worker(s)));
+    if (cacheFilePath) { try { fs.writeFileSync(cacheFilePath, JSON.stringify(allBranches, null, 2)); } catch {} }
   } finally {
     try { await browser.close(); } catch {}
   }

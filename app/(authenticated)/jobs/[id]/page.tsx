@@ -127,7 +127,7 @@ export default async function JobPage({ params }: { params: { id: string } }) {
               ))}
             </p>
           </div>
-          <DashboardView data={dashboardData} />
+          <DashboardView data={dashboardData} canEdit={profile?.role !== 'viewer'} />
         </div>
       ) : (
         <LiveJobView initialJob={job} initialLogs={logs || []} />

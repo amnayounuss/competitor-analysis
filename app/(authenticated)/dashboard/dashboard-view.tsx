@@ -77,6 +77,8 @@ interface DashboardProps {
     allJobs?: any[];
   };
   isGlobalDashboard?: boolean;
+  /** When true, show manual add/delete/dedup controls (client owners, not viewers). */
+  canEdit?: boolean;
 }
 
 const PALETTE = ['#4F46E5', '#10B981', '#EF4444', '#F59E0B', '#0EA5E9', '#A855F7', '#EC4899', '#14B8A6'];
@@ -296,7 +298,7 @@ function formatArabicDigits(val: string | number, isAr: boolean, options?: { dec
   return str;
 }
 
-export default function DashboardView({ data, isGlobalDashboard = false }: DashboardProps) {
+export default function DashboardView({ data, isGlobalDashboard = false, canEdit = false }: DashboardProps) {
   const { analytics, targetBrand, competitorBrands, dateStart, dateEnd, jobId, allJobs = [] } = data;
   const router = useRouter();
   const t = useT();
@@ -353,6 +355,78 @@ export default function DashboardView({ data, isGlobalDashboard = false }: Dashb
       setIsSendingEmail(false);
     }
   };
+
+  // ── Manual branch management (add / delete / dedup) ──
+  const [branchBusy, setBranchBusy] = useState(false);
+  const [branchMsg, setBranchMsg] = useState('');
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const emptyAddForm = {
+    brand: '', branch_name: '', city: '', address: '', google_maps_link: '',
+    phone: '', business_hours: '', stars: '', reviews_count: '', place_id: '',
+  };
+  const [addForm, setAddForm] = useState({ ...emptyAddForm });
+
+  const handleDeleteBranch = useCallback(async (branchId: string, name: string) => {
+    if (!jobId) return;
+    if (!window.confirm(`Delete branch "${name}"? This recalculates all analytics.`)) return;
+    setBranchBusy(true); setBranchMsg('');
+    try {
+      const res = await fetch('/api/branches', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, branchId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Delete failed');
+      setBranchMsg('Branch deleted.');
+      router.refresh();
+    } catch (e: any) { setBranchMsg('Error: ' + e.message); }
+    finally { setBranchBusy(false); }
+  }, [jobId, router]);
+
+  const handleDedup = useCallback(async () => {
+    if (!jobId) return;
+    if (!window.confirm('Remove duplicate locations (same place / name+city)?')) return;
+    setBranchBusy(true); setBranchMsg('');
+    try {
+      const res = await fetch('/api/branches', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, action: 'dedup' }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Dedup failed');
+      setBranchMsg(`Removed ${d.removed} duplicate(s).`);
+      router.refresh();
+    } catch (e: any) { setBranchMsg('Error: ' + e.message); }
+    finally { setBranchBusy(false); }
+  }, [jobId, router]);
+
+  const handleAddBranch = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!jobId || !addForm.brand.trim() || !addForm.branch_name.trim()) {
+      setBranchMsg('Brand and branch name are required.'); return;
+    }
+    setBranchBusy(true); setBranchMsg('Adding (scraping popular times if place_id given)…');
+    try {
+      const res = await fetch('/api/branches', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, branch: {
+          brand: addForm.brand.trim(), branch_name: addForm.branch_name.trim(),
+          city: addForm.city.trim() || null, address: addForm.address.trim() || null,
+          google_maps_link: addForm.google_maps_link.trim() || null,
+          phone: addForm.phone.trim() || null, business_hours: addForm.business_hours.trim() || null,
+          stars: addForm.stars ? Number(addForm.stars) : null,
+          reviews_count: addForm.reviews_count ? Number(addForm.reviews_count) : 0,
+          place_id: addForm.place_id.trim() || null,
+        } }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Add failed');
+      setBranchMsg(`Added.${d.popularTimes ? ' Popular times scraped.' : ''}`);
+      setIsAddOpen(false); setAddForm({ ...emptyAddForm });
+      router.refresh();
+    } catch (e: any) { setBranchMsg('Error: ' + e.message); }
+    finally { setBranchBusy(false); }
+  }, [jobId, addForm, router]);
 
   const [filterBrand, setFilterBrand] = useState('All');
   const [filterCity, setFilterCity] = useState('All');
@@ -1813,6 +1887,18 @@ export default function DashboardView({ data, isGlobalDashboard = false }: Dashb
                 sub={`${filteredBranches.length} ${t('branches')} — ${t('all columns from the Excel report')}`}
               />
               <div className="flex flex-wrap gap-2">
+                {canEdit && jobId && (
+                  <>
+                    <button type="button" onClick={() => { setIsAddOpen(true); setBranchMsg(''); }} disabled={branchBusy}
+                      className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-50">
+                      + {t('Add Location')}
+                    </button>
+                    <button type="button" onClick={handleDedup} disabled={branchBusy}
+                      className="px-3 py-2 bg-amber-500 text-white rounded-xl text-xs font-black hover:bg-amber-600 disabled:opacity-50">
+                      {t('Remove Duplicates')}
+                    </button>
+                  </>
+                )}
                 <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)}
                   className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
                   <option value="All">All Brands</option>
@@ -1828,10 +1914,15 @@ export default function DashboardView({ data, isGlobalDashboard = false }: Dashb
               </div>
             </div>
 
+            {canEdit && branchMsg && (
+              <div className="mb-3 text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">{branchMsg}</div>
+            )}
+
             <div className="overflow-x-auto -mx-2">
               <table className="w-full text-start text-xs min-w-[1600px]">
                 <thead>
                   <tr className="border-b border-slate-100">
+                    {canEdit && <TH align="center">{t('Actions')}</TH>}
                     <TH>{t('Brand')}</TH>
                     <TH clickable onClick={() => handleSort('name')}>{t('Branch Name')} {sortCol === 'name' ? (sortAsc ? '↑' : '↓') : ''}</TH>
                     <TH>{t('Address')}</TH>
@@ -1858,6 +1949,13 @@ export default function DashboardView({ data, isGlobalDashboard = false }: Dashb
                 <tbody className="divide-y divide-slate-50">
                   {filteredBranches.map(a => (
                     <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${selectedId === a.id ? 'bg-indigo-50/40' : ''}`}>
+                      {canEdit && (
+                        <td className="px-2 py-3 text-center">
+                          <button type="button" title="Delete branch" disabled={branchBusy}
+                            onClick={() => handleDeleteBranch(a.id, getBranchDisplayName(a))}
+                            className="text-rose-500 hover:text-rose-700 font-black disabled:opacity-40 text-sm leading-none">✕</button>
+                        </td>
+                      )}
                       <td className="px-2 py-3">
                         <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
                       </td>
@@ -1891,6 +1989,42 @@ export default function DashboardView({ data, isGlobalDashboard = false }: Dashb
               </table>
             </div>
           </Card>
+
+          {canEdit && isAddOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setIsAddOpen(false)}>
+              <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-black text-slate-900 mb-4">{t('Add Location')}</h3>
+                <form onSubmit={handleAddBranch} className="grid grid-cols-2 gap-3">
+                  {([
+                    ['brand', 'Brand *'], ['branch_name', 'Branch Name *'],
+                    ['city', 'City'], ['address', 'Address'],
+                    ['google_maps_link', 'Google Maps Link'], ['place_id', 'Place ID (ChIJ… → scrapes popular times)'],
+                    ['phone', 'Phone'], ['business_hours', 'Hours'],
+                    ['stars', 'Avg Rating (0–5)'], ['reviews_count', 'Reviews Count'],
+                  ] as [keyof typeof addForm, string][]).map(([k, label]) => (
+                    <label key={k} className={`flex flex-col gap-1 ${k === 'address' || k === 'google_maps_link' || k === 'place_id' ? 'col-span-2' : ''}`}>
+                      <span className="text-[10px] font-black text-slate-500 uppercase">{label}</span>
+                      {k === 'brand' ? (
+                        <input list="brand-options" value={addForm.brand} onChange={e => setAddForm(f => ({ ...f, brand: e.target.value }))}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                      ) : (
+                        <input type={k === 'stars' || k === 'reviews_count' ? 'number' : 'text'} step="any"
+                          value={addForm[k]} onChange={e => setAddForm(f => ({ ...f, [k]: e.target.value }))}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                      )}
+                    </label>
+                  ))}
+                  <datalist id="brand-options">
+                    {brandSummaries.map(b => <option key={b.brand} value={b.brand} />)}
+                  </datalist>
+                  <div className="col-span-2 flex gap-2 justify-end mt-2">
+                    <button type="button" onClick={() => setIsAddOpen(false)} className="px-4 py-2 rounded-xl text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200">{t('Cancel')}</button>
+                    <button type="submit" disabled={branchBusy} className="px-4 py-2 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">{branchBusy ? '…' : t('Add Location')}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </>
       )}
 

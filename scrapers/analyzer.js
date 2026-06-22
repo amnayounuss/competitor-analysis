@@ -113,7 +113,15 @@ function computeBranchMetrics(place, cutoffDate, endDate) {
       countWithRating++;
     }
   }
-  const avgRating = countWithRating > 0 ? Number((sumRating / countWithRating).toFixed(2)) : null;
+  // Review count is the WINDOWED count (consistent with the star histogram and
+  // period buckets, which are also windowed). For the average rating we fall
+  // back to Google's place-level score only for DISPLAY when the window has no
+  // reviews (it carries 0 weight in brand aggregates since totalReviews is 0).
+  const placeRating = Number(place.rating);
+  const avgRating = countWithRating > 0
+    ? Number((sumRating / countWithRating).toFixed(2))
+    : (placeRating >= 1 && placeRating <= 5 ? placeRating : null);
+  const totalReviews = recent.length;
 
   // Per-month aggregates
   const monthStats = monthBuckets.map((bucket) => {
@@ -147,6 +155,7 @@ function computeBranchMetrics(place, cutoffDate, endDate) {
   return {
     brand:            assignBrand(place),
     branchName:       place.title || "Unknown",
+    placeId:          place.placeId || place.place_id || null,
     city:             extractCity(place),
     address:          place.address || "",
     addressLink:      place.addressLink || place.url || "",
@@ -154,7 +163,7 @@ function computeBranchMetrics(place, cutoffDate, endDate) {
     phone:            place.phone || "",
     popularTimes:     place.popularTimes || null,
     avgRatingPeriod:      avgRating,
-    totalReviewsPeriod:   recent.length,
+    totalReviewsPeriod:   totalReviews,
     stars5:           stars[5],
     stars4:           stars[4],
     stars3:           stars[3],
