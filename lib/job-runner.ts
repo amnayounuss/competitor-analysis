@@ -327,9 +327,13 @@ export async function runJob(job: Job): Promise<void> {
 
     // ── AI Branch Naming & City Normalization ──
     const detectBrand = makeBrandDetector(job.target_name, job.competitors);
-    // Explicitly tag every raw place with its exact brand before we rename them
+    // Explicitly tag every raw place with its exact brand before we rename them,
+    // and preserve the ORIGINAL Google store name (English or Arabic, exactly as
+    // Google returns it) — the AI parser overwrites `title` with a district name,
+    // so capture the real store name first for the dedicated store_name column.
     for (const p of rawPlaces) {
       p.__searchBrand = detectBrand(p);
+      if (!p.store_name) p.store_name = p.title || '';
     }
 
     const clientAiKey = anthropicKey ?? await getClientAnthropicKey(job.user_id);
@@ -552,6 +556,7 @@ async function pushDataToClientDb(
     job_id: jobId,
     brand: detectBrand(p),
     branch_name: p.title || '(unknown)',
+    store_name: p.store_name || p.title || null,
     city: p.city || extractCity(p.address),
     address: p.address,
     phone: p.phone || null,
@@ -570,12 +575,24 @@ async function pushDataToClientDb(
   await cdb.from('reviews').delete().eq('job_id', jobId);
   await cdb.from('branches').delete().eq('job_id', jobId);
 
-  let { data: insertedBranches, error: branchErr } = await cdb
-    .from('branches').insert(branchRows).select('id, branch_name, brand, place_id');
-  if (branchErr?.message?.includes('place_id')) {
-    const rowsNoPid = branchRows.map(({ place_id, ...rest }) => rest);
+  // Insert branches; gracefully drop optional columns the client schema may not
+  // have yet (place_id, store_name) by retrying without whichever the error names.
+  const stripCols = (rows: any[], cols: string[]) =>
+    rows.map(r => { const c = { ...r }; for (const k of cols) delete c[k]; return c; });
+  let rowsToInsert = branchRows;
+  let selectCols = 'id, branch_name, brand, place_id';
+  let insertedBranches: any[] | null = null;
+  let branchErr: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
     ({ data: insertedBranches, error: branchErr } = await cdb
-      .from('branches').insert(rowsNoPid).select('id, branch_name, brand'));
+      .from('branches').insert(rowsToInsert).select(selectCols));
+    if (!branchErr) break;
+    if (branchErr.message?.includes('store_name')) {
+      rowsToInsert = stripCols(rowsToInsert, ['store_name']);
+    } else if (branchErr.message?.includes('place_id')) {
+      rowsToInsert = stripCols(rowsToInsert, ['place_id']);
+      selectCols = 'id, branch_name, brand';
+    } else break;
   }
   if (branchErr) throw new Error('Failed inserting branches: ' + branchErr.message);
 
@@ -681,6 +698,7 @@ async function pushDataToClientDb(
         branch_id: branchIdFor(r.brand, r.branchName, r.placeId) || null,
         brand: r.brand,
         branch_name: r.branchName,
+        store_name: place?.store_name || r.branchName || null,
         city: r.city || null,
         address: r.address || null,
         google_maps_link: mapsLink,
@@ -711,17 +729,19 @@ async function pushDataToClientDb(
       };
     });
 
-    let stripPlaceId = false;
+    // Drop optional columns the client schema may lack (place_id, store_name).
+    const strip = new Set<string>();
+    const applyStrip = (rows: any[]) => strip.size === 0 ? rows
+      : rows.map((row: any) => { const c = { ...row }; for (const k of strip) delete c[k]; return c; });
     for (let i = 0; i < analyticsRows.length; i += 200) {
-      let chunk = analyticsRows.slice(i, i + 200);
-      if (stripPlaceId) chunk = chunk.map(({ place_id, ...rest }: any) => rest);
-      let { error } = await cdb.from('branch_analytics').insert(chunk);
-      if (error?.message?.includes('place_id') && !stripPlaceId) {
-        stripPlaceId = true;
-        chunk = chunk.map(({ place_id, ...rest }: any) => rest);
-        ({ error } = await cdb.from('branch_analytics').insert(chunk));
+      let chunk = applyStrip(analyticsRows.slice(i, i + 200));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await cdb.from('branch_analytics').insert(chunk);
+        if (!error) break;
+        if (error.message?.includes('store_name')) { strip.add('store_name'); chunk = applyStrip(analyticsRows.slice(i, i + 200)); }
+        else if (error.message?.includes('place_id')) { strip.add('place_id'); chunk = applyStrip(analyticsRows.slice(i, i + 200)); }
+        else throw new Error('Failed inserting branch_analytics: ' + error.message);
       }
-      if (error) throw new Error('Failed inserting branch_analytics: ' + error.message);
     }
   }
 }

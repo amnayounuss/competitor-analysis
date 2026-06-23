@@ -12,7 +12,8 @@ create table if not exists public.branches (
   job_id          uuid        not null,                   -- from the SaaS app
   place_id        text,                                   -- Google Maps place identifier for dedup
   brand           text        not null,                   -- target brand or competitor name
-  branch_name     text        not null,
+  branch_name     text        not null,                   -- clean district/area name (AI-parsed)
+  store_name      text,                                   -- original Google store name (EN or AR, as Google returns it)
   city            text,
   address         text,
   phone           text,
@@ -99,6 +100,7 @@ create table if not exists public.branch_analytics (
 
   brand                   text         not null,
   branch_name             text         not null,
+  store_name              text,
   city                    text,
   address                 text,
   google_maps_link        text,

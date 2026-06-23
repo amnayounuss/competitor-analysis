@@ -12,6 +12,7 @@ interface BranchAnalytics {
   branch_id: string | null;
   brand: string;
   branch_name: string;
+  store_name: string | null;
   city: string | null;
   address: string | null;
   google_maps_link: string | null;
@@ -361,7 +362,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
   const [branchMsg, setBranchMsg] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const emptyAddForm = {
-    brand: '', branch_name: '', city: '', address: '', google_maps_link: '',
+    brand: '', store_name: '', branch_name: '', city: '', address: '', google_maps_link: '',
     phone: '', business_hours: '', stars: '', reviews_count: '', place_id: '',
   };
   const [addForm, setAddForm] = useState({ ...emptyAddForm });
@@ -411,6 +412,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId, branch: {
           brand: addForm.brand.trim(), branch_name: addForm.branch_name.trim(),
+          store_name: addForm.store_name.trim() || null,
           city: addForm.city.trim() || null, address: addForm.address.trim() || null,
           google_maps_link: addForm.google_maps_link.trim() || null,
           phone: addForm.phone.trim() || null, business_hours: addForm.business_hours.trim() || null,
@@ -1924,6 +1926,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                   <tr className="border-b border-slate-100">
                     {canEdit && <TH align="center">{t('Actions')}</TH>}
                     <TH>{t('Brand')}</TH>
+                    <TH>{t('Store Name')}</TH>
                     <TH clickable onClick={() => handleSort('name')}>{t('Branch Name')} {sortCol === 'name' ? (sortAsc ? '↑' : '↓') : ''}</TH>
                     <TH>{t('Address')}</TH>
                     <TH>{t('Maps')}</TH>
@@ -1959,6 +1962,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                       <td className="px-2 py-3">
                         <BrandBadge brand={a.brand} color={colorMap[a.brand] || '#94A3B8'} />
                       </td>
+                      <td className="px-2 py-3 text-[11px] font-bold text-slate-700 max-w-[200px] truncate" title={a.store_name || ''}>{a.store_name || '—'}</td>
                       <td className="px-2 py-3 font-black text-slate-900 whitespace-nowrap">{getBranchDisplayName(a)}</td>
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[180px] truncate" title={a.address || ''}>{a.address || '—'}</td>
                       <td className="px-2 py-3">
@@ -1996,7 +2000,8 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                 <h3 className="text-lg font-black text-slate-900 mb-4">{t('Add Location')}</h3>
                 <form onSubmit={handleAddBranch} className="grid grid-cols-2 gap-3">
                   {([
-                    ['brand', 'Brand *'], ['branch_name', 'Branch Name *'],
+                    ['brand', 'Brand *'], ['store_name', 'Store Name (Google)'],
+                    ['branch_name', 'Branch Name *'],
                     ['city', 'City'], ['address', 'Address'],
                     ['google_maps_link', 'Google Maps Link'], ['place_id', 'Place ID (ChIJ… → scrapes popular times)'],
                     ['phone', 'Phone'], ['business_hours', 'Hours'],
