@@ -15,10 +15,10 @@
 -- ============================================================
 
 -- ── Sheet 1: Branch Wise Data ──────────────────────────────
-create table if not exists public.branch_analytics (
+create table if not exists branch_analytics (
   id                      uuid         primary key default gen_random_uuid(),
   job_id                  uuid         not null,
-  branch_id               uuid         references public.branches(id) on delete cascade,
+  branch_id               uuid         references branches(id) on delete cascade,
 
   -- Google Maps place identifier for cross-job deduplication
   place_id                text,
@@ -70,14 +70,14 @@ create table if not exists public.branch_analytics (
 );
 
 create index if not exists branch_analytics_job_idx
-  on public.branch_analytics (job_id);
+  on branch_analytics (job_id);
 create index if not exists branch_analytics_brand_idx
-  on public.branch_analytics (brand);
+  on branch_analytics (brand);
 create index if not exists branch_analytics_branch_idx
-  on public.branch_analytics (branch_id);
+  on branch_analytics (branch_id);
 
 -- ── Sheet 3: Rankings (view over branch_analytics) ─────────
-create or replace view public.branch_rankings as
+create or replace view branch_rankings as
 select
   row_number() over (
     partition by job_id
@@ -92,14 +92,14 @@ select
   address,
   avg_rating_period            as avg_rating,
   total_reviews_period         as reviews
-from public.branch_analytics
+from branch_analytics
 where total_reviews_period > 0
   and avg_rating_period is not null;
 
 -- ── Sheet 5: Popular Times Detail (flat 24-hour view) ──────
 --  One row per (branch × day). Hour columns 0_h .. 23_h hold
 --  the % busy value (0-100, NULL if unknown).
-create or replace view public.popular_times_detail as
+create or replace view popular_times_detail as
 with day_rows as (
   select
     ba.job_id,
@@ -117,7 +117,7 @@ with day_rows as (
       when 'SATURDAY'  then 'Saturday'
     end                                     as day_label,
     ba.popular_times_grid -> day_key       as hourly
-  from public.branch_analytics ba
+  from branch_analytics ba
   cross join (
     values ('SUNDAY'),('MONDAY'),('TUESDAY'),('WEDNESDAY'),
            ('THURSDAY'),('FRIDAY'),('SATURDAY')
@@ -142,7 +142,7 @@ from day_rows
 where hourly is not null;
 
 -- ── Sheet 6: Dashboard summary (per-job rollup) ────────────
-create or replace view public.job_summary as
+create or replace view job_summary as
 select
   ba.job_id,
   count(*)                                                          as total_branches,
@@ -155,5 +155,5 @@ select
   )                                                                  as weighted_avg_rating,
   min(date_start)                                                    as date_start,
   max(date_end)                                                      as date_end
-from public.branch_analytics ba
+from branch_analytics ba
 group by ba.job_id;

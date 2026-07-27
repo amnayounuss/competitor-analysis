@@ -8,5 +8,5 @@
 --  the clean AI-parsed branch_name (district/area).
 -- ============================================================
 
-alter table public.branches         add column if not exists store_name text;
-alter table public.branch_analytics add column if not exists store_name text;
+alter table branches         add column if not exists store_name text;
+alter table branch_analytics add column if not exists store_name text;

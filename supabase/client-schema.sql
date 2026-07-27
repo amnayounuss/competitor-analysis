@@ -1,13 +1,11 @@
 -- ============================================================
---  Client DB schema — run THIS in YOUR Supabase project
---  (the one you connect to the SaaS app)
---
---  This creates the tables that will hold your scraped business
---  data: branches, reviews, analyses, and report files.
+--  Client DB schema — tables for scraped business data.
+--  Used both for cloud Supabase clients and self-hosted schemas.
+--  NOTE: No schema prefix — tables resolve via search_path.
 -- ============================================================
 
 -- ── Branches (target + competitors) ─────────────────────────
-create table if not exists public.branches (
+create table if not exists branches (
   id              uuid        primary key default gen_random_uuid(),
   job_id          uuid        not null,                   -- from the SaaS app
   place_id        text,                                   -- Google Maps place identifier for dedup
@@ -26,14 +24,14 @@ create table if not exists public.branches (
   created_at      timestamptz not null default now()
 );
 
-create index if not exists branches_job_idx   on public.branches (job_id);
-create index if not exists branches_brand_idx on public.branches (brand);
+create index if not exists branches_job_idx   on branches (job_id);
+create index if not exists branches_brand_idx on branches (brand);
 
 -- ── Reviews (per branch) ─────────────────────────────────────
-create table if not exists public.reviews (
+create table if not exists reviews (
   id            bigserial   primary key,
   job_id        uuid        not null,
-  branch_id     uuid        references public.branches(id) on delete cascade,
+  branch_id     uuid        references branches(id) on delete cascade,
   brand         text        not null,
   rating        int         check (rating between 1 and 5),
   text          text,
@@ -42,12 +40,12 @@ create table if not exists public.reviews (
   created_at    timestamptz not null default now()
 );
 
-create index if not exists reviews_job_idx       on public.reviews (job_id);
-create index if not exists reviews_branch_idx    on public.reviews (branch_id);
-create index if not exists reviews_published_idx on public.reviews (published_at desc);
+create index if not exists reviews_job_idx       on reviews (job_id);
+create index if not exists reviews_branch_idx    on reviews (branch_id);
+create index if not exists reviews_published_idx on reviews (published_at desc);
 
 -- ── Analyses (per-brand summary) ────────────────────────────
-create table if not exists public.analyses (
+create table if not exists analyses (
   id                bigserial   primary key,
   job_id            uuid        not null,
   brand             text        not null,
@@ -62,10 +60,10 @@ create table if not exists public.analyses (
   created_at        timestamptz not null default now()
 );
 
-create index if not exists analyses_job_idx on public.analyses (job_id);
+create index if not exists analyses_job_idx on analyses (job_id);
 
 -- ── Reports (Excel + Markdown URLs) ─────────────────────────
-create table if not exists public.reports (
+create table if not exists reports (
   id              bigserial   primary key,
   job_id          uuid        not null unique,
   target_brand    text        not null,
@@ -76,10 +74,10 @@ create table if not exists public.reports (
   created_at      timestamptz not null default now()
 );
 
-create index if not exists reports_job_idx on public.reports (job_id);
+create index if not exists reports_job_idx on reports (job_id);
 
 -- ── Job history (mirror of admin's jobs for client's view) ──
-create table if not exists public.job_history (
+create table if not exists job_history (
   job_id          uuid        primary key,
   target_brand    text        not null,
   competitors     text[],
@@ -93,10 +91,10 @@ create table if not exists public.job_history (
 );
 
 -- ── Branch analytics (mirrors Excel "Branch Wise Data" sheet) ──
-create table if not exists public.branch_analytics (
+create table if not exists branch_analytics (
   id                      uuid         primary key default gen_random_uuid(),
   job_id                  uuid         not null,
-  branch_id               uuid         references public.branches(id) on delete cascade,
+  branch_id               uuid         references branches(id) on delete cascade,
 
   brand                   text         not null,
   branch_name             text         not null,
@@ -136,12 +134,12 @@ create table if not exists public.branch_analytics (
   created_at              timestamptz  not null default now()
 );
 
-create index if not exists branch_analytics_job_idx    on public.branch_analytics (job_id);
-create index if not exists branch_analytics_brand_idx  on public.branch_analytics (brand);
-create index if not exists branch_analytics_branch_idx on public.branch_analytics (branch_id);
+create index if not exists branch_analytics_job_idx    on branch_analytics (job_id);
+create index if not exists branch_analytics_brand_idx  on branch_analytics (brand);
+create index if not exists branch_analytics_branch_idx on branch_analytics (branch_id);
 
 -- ── Rankings view (Sheet 3) ────────────────────────────────
-create or replace view public.branch_rankings as
+create or replace view branch_rankings as
 select
   row_number() over (
     partition by job_id
@@ -151,11 +149,11 @@ select
   job_id, branch_id, brand, branch_name, city, address,
   avg_rating_period        as avg_rating,
   total_reviews_period     as reviews
-from public.branch_analytics
+from branch_analytics
 where total_reviews_period > 0 and avg_rating_period is not null;
 
 -- ── Popular times flat view (Sheet 5) ──────────────────────
-create or replace view public.popular_times_detail as
+create or replace view popular_times_detail as
 with day_rows as (
   select ba.job_id, ba.branch_id, ba.brand, ba.branch_name,
          d.day_key as day,
@@ -166,7 +164,7 @@ with day_rows as (
            when 'SATURDAY' then 'Saturday'
          end as day_label,
          ba.popular_times_grid -> d.day_key as hourly
-  from public.branch_analytics ba
+  from branch_analytics ba
   cross join (values ('SUNDAY'),('MONDAY'),('TUESDAY'),('WEDNESDAY'),
                      ('THURSDAY'),('FRIDAY'),('SATURDAY')) as d(day_key)
   where ba.popular_times_grid is not null
@@ -187,7 +185,7 @@ select job_id, branch_id, brand, branch_name, day, day_label,
 from day_rows where hourly is not null;
 
 -- ── Per-job summary (Sheet 6 "Dashboard") ──────────────────
-create or replace view public.job_summary as
+create or replace view job_summary as
 select
   job_id,
   count(*)                                                  as total_branches,
@@ -199,22 +197,9 @@ select
   )                                                         as weighted_avg_rating,
   min(date_start)                                           as date_start,
   max(date_end)                                             as date_end
-from public.branch_analytics
+from branch_analytics
 group by job_id;
 
--- ── Storage bucket for Excel + Markdown files ───────────────
--- This SQL creates the bucket if it doesn't exist.
-insert into storage.buckets (id, name, public)
-values ('reports', 'reports', true)
-on conflict (id) do nothing;
-
--- Public read access for the bucket — files have unguessable UUIDs in their paths
-drop policy if exists "Public reports read" on storage.objects;
-create policy "Public reports read"
-  on storage.objects for select
-  using (bucket_id = 'reports');
-
-drop policy if exists "Service role full access" on storage.objects;
-create policy "Service role full access"
-  on storage.objects for all
-  using (bucket_id = 'reports');
+-- ── Storage ─────────────────────────────────────────────────
+-- Storage bucket (reports) is created once at the instance level,
+-- not per-client schema. See docker/scripts/setup.sh.

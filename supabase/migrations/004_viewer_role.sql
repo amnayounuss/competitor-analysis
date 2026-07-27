@@ -10,6 +10,9 @@ alter table public.profiles add column if not exists parent_user_id uuid referen
 update public.profiles set role = 'admin' where is_admin = true;
 update public.profiles set role = 'client' where is_admin = false;
 
+-- Drop policy that depends on is_admin BEFORE dropping the column
+drop policy if exists "app_settings: admin" on public.app_settings;
+
 -- Drop is_admin (replaced by role)
 alter table public.profiles drop column if exists is_admin;
 

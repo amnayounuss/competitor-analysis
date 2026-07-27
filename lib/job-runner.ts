@@ -375,7 +375,7 @@ export async function runJob(job: Job): Promise<void> {
     // ── Stage G — upload files to client Storage ──
     await checkCancellation();
     await setProgress(92, 'Uploading report files to your storage');
-    const { excel_url, report_url } = await uploadReportsToClientStorage(cdb, job.id, cfg);
+    const { excel_url, report_url } = await uploadReportsToClientStorage(cdb, job.id, cfg, creds.schema_name);
     await log('info', 'Files uploaded — public URLs ready');
 
     // ── Stage H — record report row ──
@@ -746,12 +746,13 @@ async function pushDataToClientDb(
   }
 }
 
-async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any) {
+async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any, schemaName?: string | null) {
   const excelBuf = fs.readFileSync(cfg.EXCEL_FILE);
   const mdBuf    = fs.readFileSync(cfg.REPORT_FILE);
 
-  const excelKey = `${jobId}/${path.basename(cfg.EXCEL_FILE)}`;
-  const mdKey    = `${jobId}/${path.basename(cfg.REPORT_FILE)}`;
+  const prefix = schemaName ? `${schemaName}/${jobId}` : jobId;
+  const excelKey = `${prefix}/${path.basename(cfg.EXCEL_FILE)}`;
+  const mdKey    = `${prefix}/${path.basename(cfg.REPORT_FILE)}`;
 
   const { error: e1 } = await cdb.storage.from('reports').upload(excelKey, excelBuf, {
     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
