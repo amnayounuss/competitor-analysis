@@ -63,23 +63,41 @@ const self = createClient(SELF_URL, SELF_KEY, {
 
 const BATCH_SIZE = 500;
 
+/**
+ * Anything that did not fully transfer. Collected as we go and reprinted at the
+ * end, because a 400-line migration log makes it far too easy to miss a single
+ * failure line and assume everything came across.
+ */
+const PROBLEMS = [];
+
 // ── Helpers ────────────────────────────────────────────────────
 
-async function fetchAll(client, table, orderBy = 'created_at') {
+/**
+ * Page through a table using keyset pagination on a unique key.
+ *
+ * Do NOT go back to .range() + .order('created_at'): created_at is not unique
+ * (rows written by one job share a timestamp), so Postgres is free to return
+ * tied rows in a different order per query. With offset paging that means
+ * pages overlap and rows in between are never fetched — silently losing data.
+ * The primary key is unique and stable, so `> lastSeen` cannot skip or repeat.
+ */
+async function fetchAll(client, table, keyColumn = 'id') {
   const rows = [];
-  let offset = 0;
+  let last = null;
   while (true) {
-    const { data, error } = await client
+    let q = client
       .from(table)
       .select('*')
-      .range(offset, offset + BATCH_SIZE - 1)
-      .order(orderBy, { ascending: true });
+      .order(keyColumn, { ascending: true })
+      .limit(BATCH_SIZE);
+    if (last !== null) q = q.gt(keyColumn, last);
 
+    const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
     if (!data?.length) break;
     rows.push(...data);
     if (data.length < BATCH_SIZE) break;
-    offset += BATCH_SIZE;
+    last = data[data.length - 1][keyColumn];
   }
   return rows;
 }
@@ -355,56 +373,143 @@ RESET search_path;
     db: { schema: schemaName },
   });
 
-  // Migrate tables
+  // Migrate tables.
+  //
+  // Failures are recorded in PROBLEMS and reprinted at the end. Previously a
+  // failed batch still counted toward `inserted`, so a run that dropped every
+  // row of a table (e.g. a column present in cloud but missing from
+  // client-schema.sql) printed a success line and scrolled past a lone WARN.
   for (const table of CLIENT_TABLES) {
     try {
       const rows = await fetchAll(cloudClient, table);
       if (!rows.length) continue;
 
-      // Insert in batches
       let inserted = 0;
+      let failed = 0;
+      const reasons = new Set();
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE);
-        const { error } = await selfClient.from(table).insert(batch);
-        if (error && !error.message.includes('duplicate key')) {
-          console.error(`    WARN: ${table}: ${error.message}`);
+        const { error } = await selfClient
+          .from(table)
+          .upsert(batch, { onConflict: 'id', ignoreDuplicates: true });
+        if (error) {
+          failed += batch.length;
+          reasons.add(error.message.slice(0, 160));
+        } else {
+          inserted += batch.length;
         }
-        inserted += batch.length;
       }
-      if (inserted > 0) console.log(`    ${table}: ${inserted} rows`);
+
+      const { count: actual } = await selfClient
+        .from(table)
+        .select('*', { count: 'exact', head: true });
+
+      if (failed) {
+        console.error(`    FAIL: ${table}: ${failed}/${rows.length} rows rejected (self-hosted now has ${actual ?? '?'})`);
+        for (const r of reasons) console.error(`          ${r}`);
+        PROBLEMS.push(`${schemaName}.${table}: ${failed}/${rows.length} rows rejected — ${[...reasons][0]}`);
+      } else if (inserted > 0) {
+        console.log(`    ${table}: ${inserted} rows (cloud ${rows.length} → self ${actual ?? '?'})`);
+        if (typeof actual === 'number' && actual < rows.length) {
+          PROBLEMS.push(`${schemaName}.${table}: cloud has ${rows.length} but self-hosted has ${actual}`);
+        }
+      }
     } catch (e) {
-      if (!e.message.includes('does not exist')) {
-        console.error(`    WARN: ${table}: ${e.message}`);
-      }
+      // Never swallow "does not exist": a missing table or column is exactly
+      // the kind of failure that silently loses an entire table.
+      console.error(`    FAIL: ${table}: ${e.message}`);
+      PROBLEMS.push(`${schemaName}.${table}: ${e.message}`);
     }
   }
 
-  // Migrate storage
+  // Migrate storage.
+  //
+  // storage.list() returns folders (prefixes) with `id: null` and real objects
+  // with an id. The previous `if (!folder.id) continue` therefore skipped every
+  // job folder at the bucket root, so zero files were ever copied while the run
+  // still reported success. Entries with an id are files; entries without are
+  // folders to descend into.
   try {
-    const { data: folders } = await cloudClient.storage.from('reports').list('', { limit: 1000 });
+    const { data: entries, error: listErr } = await cloudClient.storage
+      .from('reports').list('', { limit: 1000 });
+    if (listErr) throw new Error(listErr.message);
+
     let migrated = 0;
-    if (folders?.length) {
-      for (const folder of folders) {
-        if (!folder.id) continue;
-        const { data: files } = await cloudClient.storage.from('reports').list(folder.name, { limit: 100 });
-        if (!files?.length) continue;
-        for (const file of files) {
-          const srcPath = `${folder.name}/${file.name}`;
-          const dstPath = `${schemaName}/${folder.name}/${file.name}`;
-          const { data: blob } = await cloudClient.storage.from('reports').download(srcPath);
-          if (!blob) continue;
-          const buffer = Buffer.from(await blob.arrayBuffer());
-          const { error: upErr } = await self.storage.from('reports').upload(dstPath, buffer, {
-            upsert: true,
-            contentType: file.metadata?.mimetype || 'application/octet-stream',
-          });
-          if (!upErr) migrated++;
-        }
+    let failed = 0;
+
+    const copy = async (srcPath, dstPath, mimetype) => {
+      const { data: blob, error: dErr } = await cloudClient.storage.from('reports').download(srcPath);
+      if (dErr || !blob) { failed++; console.error(`      download failed: ${srcPath}: ${dErr?.message ?? 'empty'}`); return; }
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      const { error: upErr } = await self.storage.from('reports').upload(dstPath, buffer, {
+        upsert: true,
+        contentType: mimetype || 'application/octet-stream',
+      });
+      if (upErr) { failed++; console.error(`      upload failed: ${dstPath}: ${upErr.message}`); return; }
+      migrated++;
+    };
+
+    for (const entry of entries ?? []) {
+      if (entry.id) {
+        // A file sitting at the bucket root.
+        await copy(entry.name, `${schemaName}/${entry.name}`, entry.metadata?.mimetype);
+        continue;
+      }
+      const { data: files } = await cloudClient.storage
+        .from('reports').list(entry.name, { limit: 1000 });
+      for (const file of files ?? []) {
+        if (!file.id) continue; // nested folder — reports are only one level deep
+        await copy(
+          `${entry.name}/${file.name}`,
+          `${schemaName}/${entry.name}/${file.name}`,
+          file.metadata?.mimetype,
+        );
       }
     }
-    if (migrated > 0) console.log(`    storage: ${migrated} files`);
+
+    console.log(`    storage: ${migrated} files copied${failed ? `, ${failed} failed` : ''}`);
+    if (failed) PROBLEMS.push(`${schemaName} storage: ${failed} files failed to copy`);
+    if (migrated === 0 && (entries?.length ?? 0) > 0) {
+      PROBLEMS.push(`${schemaName} storage: cloud bucket is not empty but 0 files were copied`);
+    }
   } catch (e) {
-    console.error(`    WARN: storage: ${e.message}`);
+    console.error(`    FAIL: storage: ${e.message}`);
+    PROBLEMS.push(`${schemaName} storage: ${e.message}`);
+  }
+
+  // Repoint report download URLs at self-hosted storage. The rows copied from
+  // cloud carry that project's public URLs, so without this the app keeps
+  // serving Excel/Markdown from the old project and the migration is not
+  // actually complete — the downloads die when cloud is shut down.
+  try {
+    const { data: reports } = await selfClient.from('reports').select('id, job_id, excel_url, report_md_url');
+    let repointed = 0;
+    for (const r of reports ?? []) {
+      const { data: files } = await self.storage.from('reports').list(`${schemaName}/${r.job_id}`, { limit: 1000 });
+      if (!files?.length) continue;
+      const pick = ext => files.find(f => f.name.endsWith(ext));
+      const publicUrl = name =>
+        self.storage.from('reports').getPublicUrl(`${schemaName}/${r.job_id}/${name}`).data.publicUrl;
+
+      const patch = {};
+      const xlsx = pick('.xlsx'), md = pick('.md');
+      if (xlsx) patch.excel_url = publicUrl(xlsx.name);
+      if (md) patch.report_md_url = publicUrl(md.name);
+      if (!Object.keys(patch).length) continue;
+
+      const { error } = await selfClient.from('reports').update(patch).eq('id', r.id);
+      if (error) PROBLEMS.push(`${schemaName}.reports ${r.job_id}: repoint failed — ${error.message}`);
+      else repointed++;
+    }
+    if (repointed) console.log(`    reports: ${repointed} download URLs repointed to self-hosted`);
+
+    const stillCloud = (reports ?? []).length - repointed;
+    if (stillCloud > 0) {
+      PROBLEMS.push(`${schemaName}.reports: ${stillCloud} report(s) still point at cloud storage`);
+    }
+  } catch (e) {
+    console.error(`    FAIL: repointing report URLs: ${e.message}`);
+    PROBLEMS.push(`${schemaName}.reports: ${e.message}`);
   }
 
   // Update client_databases
@@ -433,12 +538,25 @@ async function main() {
   await migrateAdminTables();
   await migrateClients();
 
+  if (PROBLEMS.length) {
+    console.log('');
+    console.error('═══ MIGRATION INCOMPLETE ═══');
+    console.error(`${PROBLEMS.length} problem(s) — data did NOT fully transfer:`);
+    for (const p of PROBLEMS) console.error(`  ✗ ${p}`);
+    console.error('');
+    console.error('Do not shut down the cloud projects. Fix the above and re-run;');
+    console.error('this script upserts on primary key, so re-running is safe.');
+    process.exit(1);
+  }
+
   console.log('═══ Migration Complete ═══');
   console.log('');
   console.log('Next steps:');
   console.log('  1. Update app .env with self-hosted credentials');
-  console.log('  2. Ask users to reset passwords (or set via Admin API)');
-  console.log('  3. Start app: npm run dev');
+  console.log('  2. Rebuild the app — NEXT_PUBLIC_* vars are inlined at build');
+  console.log('     time, so a restart alone keeps pointing at cloud');
+  console.log('  3. Ask users to reset passwords (or set via Admin API)');
+  console.log('  4. Start app: npm run dev');
 }
 
 main().catch(e => {

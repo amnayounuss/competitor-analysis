@@ -8,3 +8,11 @@ node_modules
 /output
 docker/.env
 docker/dumps/
+
+# env backups — these carry service_role keys and DB passwords
+.env.bak*
+docker/.env.bak*
+
+# superseded build output kept for rollback
+.next.old-cloud-build/
+*.tsbuildinfo

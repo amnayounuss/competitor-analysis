@@ -95,6 +95,7 @@ create table if not exists branch_analytics (
   id                      uuid         primary key default gen_random_uuid(),
   job_id                  uuid         not null,
   branch_id               uuid         references branches(id) on delete cascade,
+  place_id                text,
 
   brand                   text         not null,
   branch_name             text         not null,
@@ -136,6 +137,7 @@ create table if not exists branch_analytics (
 
 create index if not exists branch_analytics_job_idx    on branch_analytics (job_id);
 create index if not exists branch_analytics_brand_idx  on branch_analytics (brand);
+create index if not exists branch_analytics_place_idx  on branch_analytics (place_id);
 create index if not exists branch_analytics_branch_idx on branch_analytics (branch_id);
 
 -- ── Rankings view (Sheet 3) ────────────────────────────────

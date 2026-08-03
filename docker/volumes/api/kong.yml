@@ -102,6 +102,18 @@ services:
             - admin
             - anon
 
+  ## ── Storage: public objects, no API key ───────────────────
+  ## Must come before storage-v1 so public downloads are not gated by key-auth.
+  - name: storage-v1-public
+    url: http://storage:5000/object/public/
+    routes:
+      - name: storage-v1-public-all
+        strip_path: true
+        paths:
+          - /storage/v1/object/public/
+    plugins:
+      - name: cors
+
   ## ── Storage ───────────────────────────────────────────────
   - name: storage-v1
     url: http://storage:5000/

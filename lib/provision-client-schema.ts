@@ -7,7 +7,11 @@ const CLIENT_SCHEMA_SQL = fs.readFileSync(
   'utf-8',
 );
 
-const CLIENT_MIGRATIONS = ['002_branch_analytics.sql', '003_store_name.sql'];
+const CLIENT_MIGRATIONS = [
+  '002_branch_analytics.sql',
+  '003_store_name.sql',
+  '004_branch_analytics_place_id.sql',
+];
 
 export function schemaNameForUser(userId: string): string {
   return 'client_' + userId.replace(/-/g, '').slice(0, 8);
@@ -88,6 +92,12 @@ function buildProvisionSQL(schemaName: string): string {
       END IF;
     END
     $$;
+
+    -- Rebuild PostgREST's schema cache too. 'reload config' only re-reads
+    -- settings; without this the new schema's foreign keys are missing from
+    -- the cache and embedded selects like branch_analytics(*, branches(...))
+    -- fail with PGRST200 "Could not find a relationship".
+    NOTIFY pgrst, 'reload schema';
 
     RESET search_path;
   `;

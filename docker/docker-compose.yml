@@ -171,6 +171,15 @@ services:
       SUPABASE_PUBLIC_URL: ${API_EXTERNAL_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+    # Studio binds to $HOSTNAME (container eth0 IP), not 127.0.0.1, so the
+    # image's stock healthcheck against localhost always fails. Use $HOSTNAME.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://'+process.env.HOSTNAME+':3000/api/profile').then((r)=>{if(r.status!==200)throw new Error(r.status)})"
+      interval: 5s
+      timeout: 5s
+      retries: 3
     depends_on:
       meta:
         condition: service_started
