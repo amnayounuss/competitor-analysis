@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bi, BiInline, useT } from '@/lib/bilingual';
 import { useLang } from '@/lib/lang-context';
+import ReviewWordCloud, { type ReviewWordCloudData } from './review-word-cloud';
 
 interface BranchAnalytics {
   id: string;
@@ -76,6 +77,8 @@ interface DashboardProps {
     finishedAt: string | null;
     aiSummary?: string | null;
     allJobs?: any[];
+    /** Null when the client schema has no `review_word_cloud` view. */
+    wordCloud?: ReviewWordCloudData | null;
   };
   isGlobalDashboard?: boolean;
   /** When true, show manual add/delete/dedup controls (client owners, not viewers). */
@@ -300,7 +303,7 @@ function formatArabicDigits(val: string | number, isAr: boolean, options?: { dec
 }
 
 export default function DashboardView({ data, isGlobalDashboard = false, canEdit = false }: DashboardProps) {
-  const { analytics, targetBrand, competitorBrands, dateStart, dateEnd, jobId, allJobs = [] } = data;
+  const { analytics, targetBrand, competitorBrands, dateStart, dateEnd, jobId, allJobs = [], wordCloud = null } = data;
   const router = useRouter();
   const t = useT();
   const { isAr } = useLang();
@@ -1723,6 +1726,19 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
               </table>
             </div>
           </Card>
+
+          {/* ── Review Word Cloud (your own reviews only, competitors excluded) ── */}
+          {wordCloud && (wordCloud.positive.length > 0 || wordCloud.negative.length > 0) && (
+            <Card>
+              <SectionHeader
+                title={`${t('What Customers Talk About')}`}
+                sub={`${t('AI-read words from your own Google reviews — praise on the left, complaints on the right')}`}
+              />
+              <div className="mt-6">
+                <ReviewWordCloud data={wordCloud} />
+              </div>
+            </Card>
+          )}
         </>
       )}
 

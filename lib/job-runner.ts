@@ -17,13 +17,14 @@ import { getClientDbCreds, clientDbClient, testClientDb } from './client-db';
 import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
 import { parseAddressesWithClaude, expandSearchQueries, verifyChainBranches } from './anthropic';
-import { getClientAnthropicKey } from './client-db';
+import { extractReviewWordsForJob } from './review-word-ai';
+import { getClientAnthropicKey, getClientApifyToken } from './client-db';
 
 import {
   fetchTarget, scrapeHoursForTarget, scrapeCompetitors,
   scrapeBrand, scrapePopularTimes, analyze, writeWorkbook, writeReport,
   fetchCompetitorsViaPlaces, scrapeReviewsForBranches, enrichRatingsViaPlaces,
-  enrichBranchesViaApify,
+  enrichBranchesViaApify, fetchGbpPerformance,
 } from '../scrapers';
 
 export async function runJob(job: Job): Promise<void> {
@@ -86,6 +87,9 @@ export async function runJob(job: Job): Promise<void> {
       searchLocation: job.search_location ?? undefined,
       dateStart:      job.date_start ?? undefined,
       dateEnd:        job.date_end   ?? undefined,
+      // Client's own Apify account when they supplied a token, so scraping
+      // quota is billed to them rather than to the shared instance token.
+      apifyToken:     (await getClientApifyToken(job.user_id)) ?? undefined,
     });
     fs.mkdirSync(cfg.workDir, { recursive: true });
     await log('info', `Workdir: ${cfg.workDir}`);
@@ -261,7 +265,31 @@ export async function runJob(job: Job): Promise<void> {
         const withPt  = competitors.filter((c: any) => c.popularTimes?.available).length;
         await log('info', `Apify — competitor data: ${withRev}/${competitors.length} with reviews, ${withPt}/${competitors.length} with popular times`);
       } catch (err: any) {
-        await log('warn', `Apify competitor fetch failed: ${err.message} — competitors will lack reviews/popular times`);
+        // An exhausted Apify account (or a rejected token) is not a transient
+        // blip: no retry will help, and leaving competitors with zero reviews
+        // guts the whole comparison. Fall back to scraping them from public
+        // Google Maps instead, and tell the client why.
+        if (err?.quotaExhausted || err?.badToken) {
+          const reason = err.badToken
+            ? 'Your Apify token was rejected'
+            : 'Your Apify account is out of credit';
+          await log('warn', `${reason} — falling back to Google Maps scraping for competitor reviews`);
+          await notify({
+            userId: job.user_id, jobId: job.id, kind: 'apify_key_problem',
+            title: 'Apify key needs attention',
+            body: `${reason}. This run scraped competitor reviews from Google Maps instead, which is slower and may find fewer reviews. Add a working Apify token for full data.`,
+          });
+          try {
+            await setProgress(60, 'Stage C: competitor reviews (Google Maps fallback)');
+            competitors = await scrapeReviewsForBranches(competitors, cfg, checkCancellation);
+            const withRev = competitors.filter((c: any) => (c.reviews?.length || 0) > 0).length;
+            await log('info', `Puppeteer fallback — ${withRev}/${competitors.length} competitor branches with reviews`);
+          } catch (fallbackErr: any) {
+            await log('warn', `Google Maps fallback also failed: ${fallbackErr.message} — competitors will lack reviews`);
+          }
+        } else {
+          await log('warn', `Apify competitor fetch failed: ${err.message} — competitors will lack reviews/popular times`);
+        }
       }
     }
 
@@ -371,6 +399,62 @@ export async function runJob(job: Job): Promise<void> {
       dateEnd:   job.date_end   ?? null,
     }, { target_name: job.target_name, competitors: job.competitors });
     await log('info', 'Branches, reviews, analyses, branch_analytics written to your DB');
+
+    // ── Stage P — Business Profile Performance API ──
+    // Daily metrics (impressions, clicks, calls, directions, bookings…) for the
+    // client's OWN locations. Runs after Stage F so each metric row can be tied
+    // to the branch row that was just inserted. Non-fatal: a client whose token
+    // lacks the scope, or whose locations are too new to have data, still gets
+    // the rest of the report.
+    await checkCancellation();
+    await setProgress(88, 'Stage P: Business Profile performance metrics');
+    try {
+      const perfBranches = target.filter((t: any) => t.gmbLocationId);
+      if (perfBranches.length === 0) {
+        await log('info', 'Stage P — no GMB location ids on target branches, skipping performance metrics');
+      } else {
+        const series = await fetchGbpPerformance(
+          perfBranches,
+          { dateStart: job.date_start ?? undefined, dateEnd: job.date_end ?? undefined },
+          cfg, checkCancellation,
+        );
+        const written = await pushGbpMetricsToClientDb(cdb, job.id, series, job.target_name);
+        await log('info', `Stage P — ${series.length} metric series, ${written} daily rows saved`);
+      }
+    } catch (err: any) {
+      await log('warn', `Stage P failed: ${err.message} — performance dashboards will be empty for this job`);
+    }
+
+    // ── Stage W — review word clouds ──
+    // Claude reads this job's reviews for the client's own branches and labels
+    // the sentiment-bearing words, which the dashboard renders as the positive /
+    // negative clouds. Scoped to this job's reviews, and skips any already
+    // labelled, so a re-run costs only what is new.
+    await checkCancellation();
+    await setProgress(90, 'Stage W: review word clouds');
+    try {
+      const wc = await extractReviewWordsForJob({
+        cdb, jobId: job.id, anthropicKey: clientAiKey, log,
+      });
+      if (wc.keyProblem) {
+        // The client's own key is the blocker — tell them, in a notification
+        // they will actually see, instead of only in the job log.
+        await notify({
+          userId: job.user_id, jobId: job.id, kind: 'ai_key_problem',
+          title: 'Claude API key needs attention',
+          body: wc.keyProblem.message,
+        });
+      } else if (wc.reviewsRead > 0) {
+        await log('info', `Stage W — ${wc.reviewsRead} reviews read, ${wc.positiveHits} positive + ${wc.negativeHits} negative words`);
+      } else {
+        await log('info', 'Stage W — no new reviews to label');
+      }
+      if (wc.failedBatches > 0) {
+        await log('warn', `Stage W — ${wc.failedBatches} batch(es) failed; those reviews stay unlabelled and will be picked up next run`);
+      }
+    } catch (err: any) {
+      await log('warn', `Stage W failed: ${err.message} — word clouds may be incomplete`);
+    }
 
     // ── Stage G — upload files to client Storage ──
     await checkCancellation();
@@ -567,6 +651,10 @@ async function pushDataToClientDb(
     popular_times: p.popularTimes?.grid || p.popular_times || null,
     is_target: detectBrand(p) === job.target_name,
     place_id: p.placeId || p.place_id || null,
+    // Business Profile location id — only the client's own branches have one.
+    // Required later by the Performance API, which is keyed by it rather than
+    // by place_id.
+    gmb_location_id: p.gmbLocationId || p.gmb_location_id || null,
   }));
 
   // Clean up stale data from previous runs of the same job
@@ -580,14 +668,18 @@ async function pushDataToClientDb(
   const stripCols = (rows: any[], cols: string[]) =>
     rows.map(r => { const c = { ...r }; for (const k of cols) delete c[k]; return c; });
   let rowsToInsert = branchRows;
-  let selectCols = 'id, branch_name, brand, place_id';
+  let selectCols = 'id, branch_name, brand, place_id, gmb_location_id';
   let insertedBranches: any[] | null = null;
   let branchErr: any = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     ({ data: insertedBranches, error: branchErr } = await cdb
       .from('branches').insert(rowsToInsert).select(selectCols));
     if (!branchErr) break;
-    if (branchErr.message?.includes('store_name')) {
+    if (branchErr.message?.includes('gmb_location_id')) {
+      // Client schema predates migration 007 — drop the column and carry on.
+      rowsToInsert = stripCols(rowsToInsert, ['gmb_location_id']);
+      selectCols = 'id, branch_name, brand, place_id';
+    } else if (branchErr.message?.includes('store_name')) {
       rowsToInsert = stripCols(rowsToInsert, ['store_name']);
     } else if (branchErr.message?.includes('place_id')) {
       rowsToInsert = stripCols(rowsToInsert, ['place_id']);
@@ -744,6 +836,67 @@ async function pushDataToClientDb(
       }
     }
   }
+}
+
+/**
+ * Write Performance API series into the client's `gbp_metrics` table.
+ *
+ * Rows are upserted on (job_id, gmb_location_id, metric, metric_date) so a
+ * re-run of the same job corrects values instead of duplicating them. Branch
+ * ids are resolved by GMB location id — the identifier the metrics are keyed by.
+ *
+ * Returns the number of daily rows written.
+ */
+async function pushGbpMetricsToClientDb(
+  cdb: any,
+  jobId: string,
+  series: any[],
+  targetBrand: string,
+): Promise<number> {
+  if (!Array.isArray(series) || series.length === 0) return 0;
+
+  // Map location id → branch row just inserted for this job.
+  const { data: branchRows, error: bErr } = await cdb
+    .from('branches')
+    .select('id, branch_name, gmb_location_id')
+    .eq('job_id', jobId)
+    .not('gmb_location_id', 'is', null);
+  if (bErr) {
+    // Schema without migration 007 — nothing to write into.
+    console.warn(`[gbp-perf] cannot read gmb_location_id (${bErr.message}) — skipping metric save`);
+    return 0;
+  }
+  const branchByLoc = new Map<string, { id: string; branch_name: string }>();
+  for (const b of branchRows || []) branchByLoc.set(String(b.gmb_location_id), b);
+
+  const rows: any[] = [];
+  for (const s of series) {
+    const branch = branchByLoc.get(String(s.gmbLocationId));
+    for (const point of s.series || []) {
+      rows.push({
+        job_id: jobId,
+        branch_id: branch?.id || null,
+        gmb_location_id: String(s.gmbLocationId),
+        brand: targetBrand,
+        branch_name: branch?.branch_name || s.title || null,
+        metric: s.metric,
+        metric_date: point.date,
+        value: Number(point.value) || 0,
+      });
+    }
+  }
+  if (rows.length === 0) return 0;
+
+  let written = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await cdb
+      .from('gbp_metrics')
+      .upsert(chunk, { onConflict: 'job_id,gmb_location_id,metric,metric_date' });
+    if (error) throw new Error('Failed inserting gbp_metrics: ' + error.message);
+    written += chunk.length;
+  }
+  return written;
 }
 
 async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any, schemaName?: string | null) {

@@ -85,9 +85,12 @@ async function extractBranchesFromPage(page) {
 async function discoverBranchesForBrand(browser, brand) {
   const page = await browser.newPage();
   await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+  // hl=en is only a hint; the header is what Google actually honours from a
+  // Saudi-facing IP. Both are needed for the English-keyed selectors to match.
+  await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
   console.log(`\n[stage1:${brand.key}] searching "${brand.name}" → ${brand.url}`);
-  await page.goto(brand.url, { waitUntil: "networkidle2", timeout: 60000 });
+  await page.goto(withEnglishLocale(brand.url), { waitUntil: "networkidle2", timeout: 60000 });
   await sleep(3000);
   await dismissConsent(page);
 
@@ -186,13 +189,54 @@ async function discoverBranches(browser) {
 
 // ─────────────── STAGE 2: per-branch details + reviews ───────────────
 
-function relativeDateToIso(rel) {
-  if (!rel) return null;
-  const s = rel.toLowerCase().trim();
-  const m = s.match(/(a|an|\d+)\s*(minute|hour|day|week|month|year)s?\s*ago/);
-  if (!m) return null;
-  const n = m[1] === "a" || m[1] === "an" ? 1 : parseInt(m[1], 10);
-  const unit = m[2];
+/**
+ * Force Google Maps into English.
+ *
+ * Every selector below keys off English text — the star aria-label contains
+ * "star", and review timestamps are matched on "ago". Branch URLs that come from
+ * the Places API ("…/maps/place/?q=place_id:X") carry no hl parameter, so on a
+ * Saudi-facing IP Google served Arabic: the star regex found no "star", the date
+ * regex found no "ago", and every scraped review ended up with stars=null and
+ * publishedAtDate=null. The analyzer drops undated reviews from the window, so
+ * the branch silently scored zero reviews and no rating. Pinning the locale is
+ * the root fix; the Arabic parsing below is the backstop for when Google ignores
+ * the hint.
+ */
+function withEnglishLocale(rawUrl) {
+  if (!rawUrl) return rawUrl;
+  let out = String(rawUrl);
+  // Deliberately string-level: round-tripping through URL/searchParams
+  // percent-encodes the ":" in "?q=place_id:ChIJ…", which Maps rejects.
+  const setParam = (url, key, value) => {
+    const re = new RegExp(`([?&])${key}=[^&#]*`);
+    if (re.test(url)) return url.replace(re, `$1${key}=${value}`);
+    const [base, hash = ""] = url.split("#");
+    return base + (base.includes("?") ? "&" : "?") + `${key}=${value}` + (hash ? "#" + hash : "");
+  };
+  out = setParam(out, "hl", "en");
+  if (!/[?&]gl=/.test(out)) out = setParam(out, "gl", "us");
+  return out;
+}
+
+/** Arabic-Indic and extended Arabic-Indic digits → ASCII. */
+function normaliseDigits(str) {
+  return String(str || "")
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+}
+
+/** Arabic relative-time unit → the unit names used below. */
+const AR_UNITS = [
+  [/\u062B\u0627\u0646\u064A|\u062B\u0648\u0627\u0646/, "minute"],        // ثانية / ثوان → treat as minutes-ish
+  [/\u062F\u0642\u064A\u0642/, "minute"],                                      // دقيقة
+  [/\u0633\u0627\u0639/, "hour"],                                               // ساعة
+  [/\u064A\u0648\u0645|\u0623\u064A\u0627\u0645/, "day"],                   // يوم / أيام
+  [/\u0623\u0633\u0628\u0648\u0639|\u0627\u0633\u0627\u0628\u064A\u0639/, "week"], // أسبوع
+  [/\u0634\u0647\u0631|\u0623\u0634\u0647\u0631/, "month"],                 // شهر / أشهر
+  [/\u0633\u0646|\u0639\u0627\u0645/, "year"],                                // سنة / عام
+];
+
+function shiftBack(unit, n) {
   const d = new Date();
   if (unit === "minute") d.setMinutes(d.getMinutes() - n);
   else if (unit === "hour") d.setHours(d.getHours() - n);
@@ -201,6 +245,45 @@ function relativeDateToIso(rel) {
   else if (unit === "month") d.setMonth(d.getMonth() - n);
   else if (unit === "year") d.setFullYear(d.getFullYear() - n);
   return d.toISOString();
+}
+
+/**
+ * Arabic dual nouns encode "2" in the word itself (شهرين = two months) with no
+ * digit present. JS \b is ASCII-word based and never fires after an Arabic
+ * letter, so a suffix test cannot be used — match the dual words explicitly.
+ */
+const AR_DUALS = [
+  [/\u062F\u0642\u064A\u0642\u062A\u064A\u0646/, "minute"],                   // دقيقتين
+  [/\u0633\u0627\u0639\u062A\u064A\u0646/, "hour"],                            // ساعتين
+  [/\u064A\u0648\u0645\u064A\u0646/, "day"],                                    // يومين
+  [/\u0627?\u0623?\u0633\u0628\u0648\u0639\u064A\u0646/, "week"],            // أسبوعين / اسبوعين
+  [/\u0634\u0647\u0631\u064A\u0646/, "month"],                                  // شهرين
+  [/\u0633\u0646\u062A\u064A\u0646|\u0639\u0627\u0645\u064A\u0646/, "year"],// سنتين / عامين
+];
+
+function relativeDateToIso(rel) {
+  if (!rel) return null;
+  const s = normaliseDigits(rel).toLowerCase().trim();
+
+  // English: "3 months ago", "a year ago"
+  const en = s.match(/(a|an|\d+)\s*(minute|hour|day|week|month|year)s?\s*ago/);
+  if (en) {
+    const n = en[1] === "a" || en[1] === "an" ? 1 : parseInt(en[1], 10);
+    return shiftBack(en[2], n);
+  }
+
+  // Arabic: "قبل 3 أشهر" / "قبل شهر" / "قبل شهرين"
+  if (/\u0642\u0628\u0644/.test(s)) {
+    const num = s.match(/(\d+)/);
+    if (num) {
+      for (const [re, unit] of AR_UNITS) if (re.test(s)) return shiftBack(unit, parseInt(num[1], 10));
+    }
+    // No digit: dual form means 2, a bare noun means 1.
+    for (const [re, unit] of AR_DUALS) if (re.test(s)) return shiftBack(unit, 2);
+    for (const [re, unit] of AR_UNITS) if (re.test(s)) return shiftBack(unit, 1);
+  }
+
+  return null;
 }
 
 async function extractBranchDetails(page) {
@@ -343,17 +426,26 @@ async function extractReviews(page) {
   return page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll('[data-review-id]'));
     return cards.map((card) => {
+      // Arabic-Indic digits → ASCII, so numbers parse whatever locale rendered.
+      const digits = (str) => String(str || "")
+        .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+        .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+
       let stars = null;
-      const starEl = card.querySelector('[role="img"][aria-label*="star" i], [aria-label*="star" i]');
+      // "star" is the English label; "نجم" covers نجمة/نجوم when Google ignores hl.
+      const starEl = card.querySelector('[role="img"][aria-label*="star" i], [aria-label*="star" i], [role="img"][aria-label*="\u0646\u062C\u0645"], [aria-label*="\u0646\u062C\u0645"]');
       if (starEl) {
-        const m = (starEl.getAttribute("aria-label") || "").match(/(\d+(?:\.\d+)?)/);
-        if (m) stars = parseFloat(m[1]);
+        const m = digits(starEl.getAttribute("aria-label")).match(/(\d+(?:[.,]\d+)?)/);
+        if (m) stars = parseFloat(m[1].replace(",", "."));
+        if (stars != null && (stars < 1 || stars > 5)) stars = null;
       }
+
       let dateRel = null;
       const spans = Array.from(card.querySelectorAll("span"));
       for (const s of spans) {
         const t = (s.textContent || "").trim();
-        if (/\bago\b/i.test(t) && t.length < 40) { dateRel = t; break; }
+        // English "… ago" or Arabic "قبل …"
+        if (t.length < 40 && (/\bago\b/i.test(t) || /\u0642\u0628\u0644/.test(t))) { dateRel = t; break; }
       }
       let text = "";
       const textEl = card.querySelector('[data-expandable-section], .wiI7pd, .MyEned');
@@ -366,12 +458,15 @@ async function extractReviews(page) {
 async function scrapeBranchFull(browser, branch, idx, total) {
   const page = await browser.newPage();
   await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+  // hl=en is only a hint; the header is what Google actually honours from a
+  // Saudi-facing IP. Both are needed for the English-keyed selectors to match.
+  await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
   const short = branch.title.slice(0, 40);
   console.log(`  [${idx + 1}/${total}] ${short} ...`);
 
   try {
-    await page.goto(branch.url, { waitUntil: "networkidle2", timeout: 60000 });
+    await page.goto(withEnglishLocale(branch.url), { waitUntil: "networkidle2", timeout: 60000 });
     await sleep(2500);
     await dismissConsent(page);
 

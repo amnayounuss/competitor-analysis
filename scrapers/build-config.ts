@@ -67,6 +67,9 @@ export interface BuildConfigArgs {
   searchLocation?: string;
   dateStart?:   string;   // YYYY-MM-DD
   dateEnd?:     string;   // YYYY-MM-DD
+  /** The client's own Apify token. Takes precedence over the instance-wide one
+   *  so each client is billed against their own Apify account. */
+  apifyToken?:  string;
 }
 
 const WORKROOT = process.env.JOB_WORKDIR || '/tmp/scraper-jobs';
@@ -141,7 +144,7 @@ export async function buildJobConfig(args: BuildConfigArgs): Promise<JobConfig> 
     },
     COMPETITORS: competitorEntries,
     PLACES_API_KEY: settings.google_places_api_key || undefined,
-    APIFY_TOKEN: settings.apify_token || undefined,
+    APIFY_TOKEN: args.apifyToken || settings.apify_token || undefined,
     REVIEWS_OPTIONS: { maxReviews: 100 },
     LOOKBACK_MONTHS: 3,
     DATE_START:      args.dateStart,

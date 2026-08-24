@@ -23,6 +23,16 @@ export async function getClientAnthropicKey(userId: string): Promise<string | nu
   return data?.anthropic_api_key || null;
 }
 
+/**
+ * The client's own Apify token, when they supplied one. Falls back to the
+ * instance-wide token in app_settings / APIFY_TOKEN at the call site.
+ */
+export async function getClientApifyToken(userId: string): Promise<string | null> {
+  const sb = adminClient();
+  const { data } = await sb.from('client_databases').select('apify_token').eq('user_id', userId).single();
+  return data?.apify_token || null;
+}
+
 export async function getClientDbCreds(userId: string): Promise<ClientDbCreds> {
   const sb = adminClient();
   const { data, error } = await sb

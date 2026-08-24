@@ -38,6 +38,7 @@ export default async function JobPage({ params }: { params: { id: string } }) {
     finishedAt: string | null;
     aiSummary: string | null;
     allJobs: any[];
+    wordCloud: { positive: { word: string; freq: number }[]; negative: { word: string; freq: number }[] } | null;
   } | null = null;
 
   if (job.status === 'succeeded') {
@@ -52,10 +53,21 @@ export default async function JobPage({ params }: { params: { id: string } }) {
         .eq('status', 'succeeded')
         .order('finished_at', { ascending: false });
 
-      const [analyticsRes, analysesRes] = await Promise.all([
+      // Word-cloud words for THIS job only. The Overview page uses the
+      // schema-wide view; here the per-job companion keeps the clouds tied to
+      // the analysis being viewed. Absent in schemas without migration 008, in
+      // which case the section is simply skipped.
+      const [analyticsRes, analysesRes, posWords, negWords] = await Promise.all([
         cdb.from('branch_analytics').select('*, branches(stars, reviews_count)').eq('job_id', job.id),
         cdb.from('analyses').select('*').eq('job_id', job.id),
+        cdb.from('review_word_cloud_ai_by_job').select('word, freq')
+          .eq('job_id', job.id).eq('sentiment', 'positive').order('freq', { ascending: false }).limit(110),
+        cdb.from('review_word_cloud_ai_by_job').select('word, freq')
+          .eq('job_id', job.id).eq('sentiment', 'negative').order('freq', { ascending: false }).limit(110),
       ]);
+      const wordCloud = (!posWords.error && !negWords.error)
+        ? { positive: posWords.data || [], negative: negWords.data || [] }
+        : null;
 
       const COUNTRY_TO_CODE: Record<string, string> = {
         'saudi arabia': 'sa', 'united arab emirates': 'ae', 'uae': 'ae',
@@ -88,6 +100,7 @@ export default async function JobPage({ params }: { params: { id: string } }) {
         finishedAt: job.finished_at || null,
         aiSummary: job.ai_summary || null,
         allJobs: allSucceededJobs || [],
+        wordCloud,
       };
     } catch (err) {
       console.error('[job-dashboard] failed to fetch client data:', err);

@@ -28,6 +28,8 @@ const _placesFetcher  = require('./places-fetcher');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _apifyFetcher   = require('./apify-fetcher');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const _gbpPerformance = require('./gbp-performance');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const _popularTimes   = require('./popular-times');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const _analyzer       = require('./analyzer');
@@ -101,6 +103,21 @@ export async function scrapeBrand(
 ): Promise<any[]> {
   return withConfig(cfg, cancelCheck, () => _scraper.scrapeBrand(brand));
 }
+
+// ── Stage P (Business Profile Performance API) ─────────────
+// Daily metric time series for the client's OWN locations, keyed by the GMB
+// location id captured in Stage A. Competitors have no location id and are
+// skipped — the API only serves locations the account manages.
+export async function fetchGbpPerformance(
+  branches: any[],
+  opts: { dateStart?: string; dateEnd?: string; metrics?: string[] },
+  cfg: JobConfig,
+  cancelCheck: (() => Promise<void>) | null = null,
+): Promise<any[]> {
+  return withConfig(cfg, cancelCheck, () => _gbpPerformance.fetchPerformance(branches, opts));
+}
+
+export const GBP_DAILY_METRICS: string[] = _gbpPerformance.DAILY_METRICS;
 
 // ── Stage D ────────────────────────────────────────────────
 export async function scrapePopularTimes(places: any[], cfg: JobConfig, cancelCheck: (() => Promise<void>) | null = null): Promise<any[]> {

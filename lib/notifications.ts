@@ -1,6 +1,10 @@
 import { adminClient } from './supabase';
 
-export type NotificationKind = 'job_succeeded' | 'job_failed' | 'email_sent' | 'job_started';
+export type NotificationKind =
+  | 'job_succeeded' | 'job_failed' | 'email_sent' | 'job_started'
+  // Client-actionable key problems: the run continued (with reduced data) but
+  // the client has to replace a key before the next one.
+  | 'ai_key_problem' | 'apify_key_problem';
 
 export async function notify(args: {
   userId: string;

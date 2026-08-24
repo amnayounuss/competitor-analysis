@@ -108,7 +108,21 @@ async function fetchViaApify(placeIds, opts = {}) {
   const url = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items?token=${token}`;
   const res = await postJson(url, input);
   if (res.status !== 200 && res.status !== 201) {
-    throw new Error(`Apify run failed: HTTP ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`);
+    const detail = typeof res.body === "object" ? JSON.stringify(res.body) : String(res.body || "");
+    const err = new Error(`Apify run failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+    // Distinguish "this account is out of credit / over its limit" from a
+    // transient failure. The caller falls back to Puppeteer scraping for the
+    // former and simply warns for the latter, so the two must not look alike.
+    const lower = detail.toLowerCase();
+    if (
+      res.status === 402 ||
+      (res.status === 403 && /usage|limit|credit|quota|billing|subscription/.test(lower)) ||
+      /monthly-usage-hard-limit|usage-limit-exceeded|insufficient|out of credit/.test(lower)
+    ) {
+      err.quotaExhausted = true;
+    }
+    if (res.status === 401) err.badToken = true;
+    throw err;
   }
   const items = Array.isArray(res.body) ? res.body : [];
   console.log(`[apify] received ${items.length} place records`);

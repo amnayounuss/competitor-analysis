@@ -37,11 +37,29 @@ export default async function DashboardOverview() {
 
   let dashboardData = null;
   let dbConnected = false;
+  // Word-cloud words from the client's own Business-Profile reviews, labelled
+  // positive/negative by Claude reading each review (see
+  // scripts/ai-review-words.mjs). Sourced from the `review_word_cloud_ai` view,
+  // which only exists in schemas that have client migration 006 — stays null
+  // elsewhere and the section is then skipped.
+  let wordCloud: { positive: { word: string; freq: number }[]; negative: { word: string; freq: number }[] } | null = null;
 
   try {
     const creds = await getClientDbCreds(effectiveUserId);
     const cdb = clientDbClient(creds);
     dbConnected = true;
+
+    // Queried per sentiment: a single top-N over both would be swamped by the
+    // positive side, which outnumbers the negative one several times over.
+    const [posWords, negWords] = await Promise.all([
+      cdb.from('review_word_cloud_ai').select('word, freq').eq('sentiment', 'positive')
+        .order('freq', { ascending: false }).limit(110),
+      cdb.from('review_word_cloud_ai').select('word, freq').eq('sentiment', 'negative')
+        .order('freq', { ascending: false }).limit(110),
+    ]);
+    if (!posWords.error && !negWords.error) {
+      wordCloud = { positive: posWords.data || [], negative: negWords.data || [] };
+    }
 
     if (allSucceededJobs && allSucceededJobs.length > 0) {
       const jobIds = allSucceededJobs.map(j => j.id);
@@ -113,6 +131,7 @@ export default async function DashboardOverview() {
         finishedAt: latestJob?.finished_at || null,
         aiSummary: latestJob?.ai_summary || null,
         allJobs: allSucceededJobs,
+        wordCloud,
       };
     }
   } catch (err) {
@@ -147,6 +166,7 @@ export default async function DashboardOverview() {
     finishedAt: null,
     aiSummary: null,
     allJobs: allSucceededJobs || [],
+    wordCloud,
   };
 
   return (

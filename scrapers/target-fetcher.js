@@ -293,6 +293,14 @@ async function fetchTarget() {
       // Hours come straight from the GMB regularHours field (no scraping).
       const hours = formatRegularHours(loc.regularHours);
 
+      // The Business Profile resource name is "locations/1234567890". Its
+      // numeric tail is the LOCATION_ID the Performance API is keyed by
+      // (businessprofileperformance…/v1/locations/{LOCATION_ID}:getDaily…),
+      // which is NOT the same identifier as the Maps place_id. Capture it here
+      // — it is only available on this API response, and every later stage
+      // needs it to pull per-location metrics.
+      const gmbLocationId = (loc.name || "").split("/").pop() || "";
+
       merged.push({
         title,
         address,
@@ -300,6 +308,9 @@ async function fetchTarget() {
         hours,
         phone,
         placeId,
+        gmbLocationId,
+        gmbResourceName: loc.name || "",
+        gmbAccountName:  acc.name || "",
         url:         mapsUrl,
         rating:      null,        // place-level avg filled by Places API enrichment
         reviewsCount: reviews.length || null,
@@ -330,7 +341,8 @@ async function fetchTarget() {
 
   const withPlaceId  = dedupById.filter((b) => b.placeId).length;
   const withHours    = dedupById.filter((b) => b.hours).length;
-  console.log(`\n  ✓ ${brand}: ${dedupById.length} unique branches | ${withPlaceId} have placeId | ${withHours} have hours (from GMB)`);
+  const withLocId    = dedupById.filter((b) => b.gmbLocationId).length;
+  console.log(`\n  ✓ ${brand}: ${dedupById.length} unique branches | ${withPlaceId} have placeId | ${withHours} have hours (from GMB) | ${withLocId} have a GMB location id (Performance API)`);
   if (totalSkippedDup > 0 || totalSkippedClosed > 0 || crossAcctDup > 0) {
     console.log(`    skipped: ${totalSkippedDup} Google-flagged duplicates, ${totalSkippedClosed} permanently closed, ${crossAcctDup} cross-account duplicates (same placeId)`);
   }

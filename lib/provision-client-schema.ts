@@ -11,6 +11,10 @@ const CLIENT_MIGRATIONS = [
   '002_branch_analytics.sql',
   '003_store_name.sql',
   '004_branch_analytics_place_id.sql',
+  '005_review_word_cloud.sql',
+  '006_review_word_ai.sql',
+  '007_gbp_performance.sql',
+  '008_review_word_cloud_by_job.sql',
 ];
 
 export function schemaNameForUser(userId: string): string {
@@ -78,8 +82,17 @@ function buildProvisionSQL(schemaName: string): string {
     DECLARE
       current_schemas text;
     BEGIN
+      -- Read the PERSISTED role setting, not pg_settings. pgrst.db_schemas is
+      -- applied only to authenticator logins, so inside exec_sql's session
+      -- pg_settings has no such row: the COALESCE fell through to the literal
+      -- default and every already-registered client schema was dropped from
+      -- the list, 404-ing every other client's dashboard until restored.
       SELECT COALESCE(
-        (SELECT setting FROM pg_settings WHERE name = 'pgrst.db_schemas'),
+        (SELECT substring(cfg FROM position('=' IN cfg) + 1)
+           FROM pg_roles r, unnest(r.rolconfig) AS cfg
+          WHERE r.rolname = 'authenticator'
+            AND cfg LIKE 'pgrst.db_schemas=%'
+          LIMIT 1),
         'public,storage,graphql_public'
       ) INTO current_schemas;
 
