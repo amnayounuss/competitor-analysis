@@ -1,9 +1,25 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
+import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
 
 const PROTECTED = ['/dashboard', '/jobs', '/admin', '/schedules', '/connect-database'];
 const PUBLIC_DURING_SETUP = ['/setup', '/api/setup'];
+
+/**
+ * Middleware runs on the server for EVERY request, so the address it uses to
+ * reach Supabase decides the floor latency of the whole app.
+ *
+ * NEXT_PUBLIC_SUPABASE_URL is the browser's address. Reaching it from inside the
+ * instance does not work — AWS does not route an instance's own public IP back
+ * to itself — so each of the calls below stalled until it timed out, putting a
+ * flat ~10s on every page load and making a healthy app look dead. Server-side
+ * code must use the internal address.
+ */
+const INTERNAL_URL = process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
+// Cookie name comes from the shared constant — deriving it here instead is what
+// made middleware look for a cookie the browser never wrote. See lib/auth-cookie.ts.
 
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
@@ -16,9 +32,10 @@ export async function middleware(req: NextRequest) {
   // ── Initialize Supabase client ──
   let res = NextResponse.next({ request: { headers: req.headers } });
   const sb = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    INTERNAL_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: { name: AUTH_COOKIE_NAME },
       cookies: {
         get(n: string) { return req.cookies.get(n)?.value; },
         set(n: string, v: string, o: CookieOptions) {
@@ -66,7 +83,7 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(new URL('/dashboard', req.url));
       }
       const dbUserId = profile?.parent_user_id || user.id;
-      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+      const admin = createClient(INTERNAL_URL, process.env.SUPABASE_SERVICE_ROLE_KEY!);
       const { data: conn } = await admin.from('client_databases').select('last_test_ok').eq('user_id', dbUserId).maybeSingle();
       if (!conn?.last_test_ok) {
         return NextResponse.redirect(new URL('/login', req.url));

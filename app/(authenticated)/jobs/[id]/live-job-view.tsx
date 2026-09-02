@@ -95,6 +95,60 @@ export default function LiveJobView({ initialJob, initialLogs }: { initialJob: J
     return () => { sb.removeChannel(jobChan); sb.removeChannel(logChan); };
   }, [job.id]);
 
+  /**
+   * Polling fallback for progress and logs.
+   *
+   * The Realtime subscriptions above ride a WebSocket to Kong. The browser now
+   * reaches Supabase through this app's /sb proxy (Kong's own port is not
+   * reachable from outside), and a Next.js rewrite does not carry a WebSocket
+   * upgrade — so on this deployment the channels never connect and a running
+   * job's progress bar and log stream simply never moved.
+   *
+   * Polling covers that. It is additive: if Realtime does connect, updates
+   * arrive there first and these queries just confirm the same state. Only runs
+   * while the job is live, and asks for log rows newer than the last one held,
+   * so a long job does not refetch its whole log every few seconds.
+   */
+  useEffect(() => {
+    if (job.status !== 'queued' && job.status !== 'running') return;
+
+    const sb = browserClient();
+    let cancelled = false;
+
+    const tick = async () => {
+      const { data: fresh } = await sb
+        .from('jobs')
+        .select('id, status, progress_pct, current_stage, started_at, finished_at, error_message, branches_total, reviews_total, excel_url, report_url')
+        .eq('id', job.id)
+        .maybeSingle();
+      if (cancelled || !fresh) return;
+      setJob(prev => ({ ...prev, ...(fresh as Partial<Job>) }));
+
+      setLogs(prev => {
+        const lastId = prev.length ? prev[prev.length - 1].id : 0;
+        void sb
+          .from('job_logs')
+          .select('id, level, message, created_at')
+          .eq('job_id', job.id)
+          .gt('id', lastId)
+          .order('id', { ascending: true })
+          .then(({ data }) => {
+            if (cancelled || !data?.length) return;
+            setLogs(cur => {
+              const seen = new Set(cur.map(l => l.id));
+              const added = (data as Log[]).filter(l => !seen.has(l.id));
+              return added.length ? [...cur, ...added] : cur;
+            });
+          });
+        return prev;
+      });
+    };
+
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [job.id, job.status]);
+
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
   return (

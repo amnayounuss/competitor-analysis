@@ -66,9 +66,18 @@ export function clientDbClient(creds: ClientDbCreds): SupabaseClient {
   }
 
   if (creds.schema_name) {
-    // Self-hosted: same instance, different schema
+    // Self-hosted: same instance, different schema.
+    //
+    // This client only ever runs server-side (server components and the
+    // worker), so it must use the INTERNAL address. NEXT_PUBLIC_SUPABASE_URL is
+    // the browser's public address, and an instance cannot reach its own public
+    // IP — the socket sat in SYN-SENT until it timed out. Because this is the
+    // only place the dashboards' client-schema data comes from, the effect was
+    // that /dashboard and /dashboard/performance streamed their shell and then
+    // hung forever on the loading skeleton, while every page that does not
+    // touch the client schema rendered in ~50ms.
     return createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       {
         auth: { autoRefreshToken: false, persistSession: false },

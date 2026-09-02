@@ -920,7 +920,18 @@ async function uploadReportsToClientStorage(cdb: any, jobId: string, cfg: any, s
 
   const { data: pub1 } = cdb.storage.from('reports').getPublicUrl(excelKey);
   const { data: pub2 } = cdb.storage.from('reports').getPublicUrl(mdKey);
-  return { excel_url: pub1.publicUrl, report_url: pub2.publicUrl };
+
+  // getPublicUrl builds an absolute URL from whatever host this process uses to
+  // reach Kong — a loopback or internal address that no browser can open, and
+  // Kong's own port is not reachable from outside anyway. Store the path
+  // relative to the app's /sb proxy instead, so the link resolves against
+  // whatever origin the user actually loaded the dashboard from.
+  const toProxyPath = (absolute: string): string => {
+    const i = absolute.indexOf('/storage/v1/');
+    return i === -1 ? absolute : `/sb${absolute.slice(i)}`;
+  };
+
+  return { excel_url: toProxyPath(pub1.publicUrl), report_url: toProxyPath(pub2.publicUrl) };
 }
 
 /** Build a brand-classifier closure over this job's target + competitors.

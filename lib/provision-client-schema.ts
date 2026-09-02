@@ -39,7 +39,14 @@ export async function provisionClientSchema(userId: string): Promise<string> {
 
   await sb.from('client_databases').upsert({
     user_id: userId,
-    supabase_url: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    // Server-side callers (worker, server components) reach Kong from INSIDE the
+    // box, where the instance's own public IP does not route back — requests to
+    // it hang until they time out. NEXT_PUBLIC_SUPABASE_URL is the browser's
+    // address and is wrong here, so prefer an explicit internal URL and fall
+    // back to loopback rather than baking the public address into the row.
+    supabase_url: process.env.SUPABASE_INTERNAL_URL
+      || process.env.NEXT_PUBLIC_SUPABASE_URL_INTERNAL
+      || 'http://localhost:8000',
     service_role_key: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     schema_name: schemaName,
     last_test_ok: true,
