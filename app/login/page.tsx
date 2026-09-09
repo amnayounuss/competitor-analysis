@@ -77,7 +77,7 @@ export default function LoginPage() {
           )}
 
           <div className="space-y-2">
-            <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Email address" /></label>
+            <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Email address" /></label>
             <input 
               type="email" 
               required 

@@ -149,3 +149,60 @@
   }
 }
 
+/* ── Printing a dashboard ──
+   "Save as PDF" is the browser's own print dialog, so the page has to stop being
+   an app and become a document.
+
+   The reason a print used to come out two pages long: the shell is a fixed
+   `h-screen` box whose content sits in an `overflow-auto` child, and printing
+   clips to that box — everything below the fold was simply cut off. So the
+   height and overflow constraints are lifted here, and the flex column is
+   flattened, before anything else is styled. */
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    /* Status colours and bars carry the meaning; a greyscale print loses it. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-root {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .print-main,
+  .print-scroll {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: none !important;
+  }
+
+  /* Navigation, the top bar and every control are chrome, not report content. */
+  aside,
+  header,
+  .print\:hidden { display: none !important; }
+
+  .print-scroll > * { padding: 0 !important; margin: 0 !important; }
+
+  /* Cards are the natural unit of the report; keep each one whole. */
+  .print-scroll > div > * {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    margin-bottom: 10px !important;
+  }
+
+  /* A wide table is legible on paper only if it is allowed to shrink. */
+  .overflow-x-auto { overflow: visible !important; }
+  table { font-size: 9.5px !important; width: 100% !important; }
+
+  /* Charts are sized for a screen; on paper they only need to be readable. */
+  svg { max-height: 210px !important; }
+}

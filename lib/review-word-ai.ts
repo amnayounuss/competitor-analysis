@@ -166,7 +166,15 @@ async function callClaude(
  */
 export async function extractReviewWordsForJob(opts: {
   cdb: any;
-  jobId: string;
+  /**
+   * Scope to one job, or null for the client's whole corpus.
+   *
+   * A job filter used to be mandatory, and once the analysis stopped writing
+   * its own copy of the client's reviews — the Business Profile sync owns them,
+   * with no job attached — that filter matched nothing and the word clouds came
+   * out empty. Same trap the sentiment pass fell into.
+   */
+  jobId: string | null;
   anthropicKey: string | null;
   batchSize?: number;
   maxReviews?: number;
@@ -185,14 +193,15 @@ export async function extractReviewWordsForJob(opts: {
   }
 
   // Client's own branches only.
-  const { data: reviewRows, error: rErr } = await cdb
+  let reviewQuery = cdb
     .from('reviews')
     .select('id, text, branches!inner(is_target)')
-    .eq('job_id', jobId)
     .eq('branches.is_target', true)
     .not('text', 'is', null)
     .order('id', { ascending: true })
     .limit(maxReviews);
+  if (jobId) reviewQuery = reviewQuery.eq('job_id', jobId);
+  const { data: reviewRows, error: rErr } = await reviewQuery;
   if (rErr) { await log('warn', `Word clouds: cannot read reviews (${rErr.message})`); return empty; }
 
   const candidates: ReviewRow[] = (reviewRows || [])

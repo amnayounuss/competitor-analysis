@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { Job } from '@/lib/types';
+import { BiInline, useT } from '@/lib/bilingual';
 
 interface BranchAnalytics {
   id: string;
@@ -99,6 +100,7 @@ function fmtDate(iso?: string | null) {
 }
 
 export default function AnalysisDashboard({ job, data }: DashboardProps) {
+  const t = useT();
   const { analytics, reviews, analyses } = data;
 
   const [filterBrand, setFilterBrand] = useState('All');
@@ -120,9 +122,8 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
     const weightedAvg   = totalBranches > 0
       ? analytics.reduce((s, a) => s + getBranchRating(a), 0) / totalBranches
       : 0;
-    const branchesWithPT = analytics.filter(a => a.popular_times_grid).length;
     const cities = Array.from(new Set(analytics.map(a => a.city).filter(Boolean))) as string[];
-    return { totalBranches, totalReviews, weightedAvg, branchesWithPT, cities };
+    return { totalBranches, totalReviews, weightedAvg, cities };
   }, [analytics]);
 
   const brandStats = useMemo(() => {
@@ -170,15 +171,6 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
     })).sort((a, b) => (b.avg ?? 0) - (a.avg ?? 0));
   }, [analytics]);
 
-  const rankings = useMemo(() => {
-    return [...analytics]
-      .filter(a => getBranchRating(a) > 0)
-      .sort((a, b) =>
-        (getBranchRating(b) - getBranchRating(a)) ||
-        (b.total_reviews_period - a.total_reviews_period)
-      );
-  }, [analytics]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return analytics.filter(a => {
@@ -211,7 +203,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
   if (analytics.length === 0) {
     return (
       <div className="p-12 bg-white rounded-3xl border border-dashed border-slate-200 text-center">
-        <h3 className="text-xl font-black text-slate-900 mb-2">No analytics rows for this job</h3>
+        <h3 className="text-xl font-black text-slate-900 mb-2"><BiInline en="No analytics rows for this job" /></h3>
         <p className="text-slate-500 mb-6 max-w-md mx-auto">
           This job ran before the new <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs">branch_analytics</code> table existed.
           Run a fresh analysis to populate the dashboard, or open the Excel below.
@@ -234,7 +226,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-100">Analysis Complete</span>
+              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-100"><BiInline en="Analysis Complete" /></span>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{periodLabel}</span>
             </div>
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-none mb-2">
@@ -263,20 +255,19 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
       </header>
 
       {/* ── KPI bar ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPI label="Branches" value={stats.totalBranches.toString()} sub={`${stats.cities.length} cities`} color="indigo" />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <KPI label="Branches" value={stats.totalBranches.toString()} sub={`${stats.cities.length} ${t('cities')}`} color="indigo" />
         <KPI label="Reviews" value={stats.totalReviews.toLocaleString()} sub={periodLabel} color="emerald" />
         <KPI label="Weighted Avg" value={`${stats.weightedAvg.toFixed(2)} ★`} sub="Across all reviews" color="amber" />
-        <KPI label="Popular Times" value={`${stats.branchesWithPT} / ${stats.totalBranches}`} sub="Branches covered" color="slate" />
       </div>
 
       {/* ── Brand Comparison ── */}
       <Card>
-        <SectionHeader title="Brand Comparison" sub="Sheet 2: how each brand performs against the others" />
+        <SectionHeader title="Brand Comparison" sub="How each brand performs against the others" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
           {/* Avg rating bars */}
           <div>
-            <p className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Average Rating</p>
+            <p className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest"><BiInline en="Average Rating" /></p>
             <div className="flex items-end gap-4 h-48">
               {brandStats.map(b => (
                 <div key={b.brand} className="flex-1 flex flex-col items-center gap-3 group">
@@ -291,23 +282,9 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
             </div>
           </div>
 
-          {/* Review market share donut */}
-          <div className="flex flex-col items-center">
-            <p className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Review Share</p>
-            <Donut data={brandStats.map(b => ({ label: b.brand, value: b.reviews, color: brandColor[b.brand] || '#94A3B8' }))} />
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {brandStats.map(b => (
-                <div key={b.brand} className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: brandColor[b.brand] || '#94A3B8' }} />
-                  <span className="text-[10px] font-black text-slate-500 uppercase">{b.brand}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Summary table */}
           <div className="space-y-3">
-            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Quick Summary</p>
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest"><BiInline en="Quick Summary" /></p>
             {brandStats.map(b => (
               <div key={b.brand} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="flex justify-between items-center mb-1">
@@ -318,7 +295,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                   <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                     <div className="h-full" style={{ width: `${((b.avg ?? 0) / 5) * 100}%`, backgroundColor: brandColor[b.brand] || '#94A3B8' }} />
                   </div>
-                  <span className="text-[10px] font-black w-8 text-right">{(b.avg ?? 0).toFixed(2)} ★</span>
+                  <span className="text-[10px] font-black w-8 text-end">{(b.avg ?? 0).toFixed(2)} ★</span>
                 </div>
               </div>
             ))}
@@ -326,121 +303,18 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
         </div>
       </Card>
 
-      {/* ── Star distribution + Monthly trend ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card>
-          <SectionHeader title="Star Distribution" sub="Sentiment split per brand" />
-          <div className="space-y-6 mt-8">
-            {brandStats.map(b => {
-              const total = b.stars.reduce((s, n) => s + n, 0) || 1;
-              return (
-                <div key={b.brand}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-black text-slate-900">{b.brand}</span>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{total.toLocaleString()} total</span>
-                  </div>
-                  <div className="h-5 w-full flex rounded-lg overflow-hidden border border-slate-100">
-                    <Seg n={b.stars[0]} t={total} c="#10B981" title="5★" />
-                    <Seg n={b.stars[1]} t={total} c="#34D399" title="4★" />
-                    <Seg n={b.stars[2]} t={total} c="#FBBF24" title="3★" />
-                    <Seg n={b.stars[3]} t={total} c="#FB7185" title="2★" />
-                    <Seg n={b.stars[4]} t={total} c="#F43F5E" title="1★" />
-                  </div>
-                  <div className="grid grid-cols-5 mt-1 text-[9px] font-black text-slate-400 tracking-tight">
-                    {b.stars.map((c, i) => (
-                      <span key={i} className={i === 0 ? 'text-left' : i === 4 ? 'text-right' : 'text-center'}>
-                        {5 - i}★ {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card>
-          <SectionHeader title="Window Trend" sub="Three equal sub-periods within the analysis window" />
-          <div className="space-y-8 mt-8">
-            {brandStats.map(b => {
-              const maxR = Math.max(1, ...b.monthly.map(m => m.reviews));
-              return (
-                <div key={b.brand}>
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs font-black text-slate-900">{b.brand}</span>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Newest → Oldest</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {b.monthly.map((m, i) => (
-                      <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-tight mb-1">Period {i+1}</div>
-                        <div className="text-lg font-black text-slate-900 leading-none">{m.reviews}</div>
-                        <div className="text-[10px] font-bold text-slate-500 mt-0.5">{m.avg != null ? `${m.avg.toFixed(2)} ★` : 'No data'}</div>
-                        <div className="mt-2 h-1 bg-slate-200 rounded overflow-hidden">
-                          <div className="h-full" style={{ width: `${(m.reviews / maxR) * 100}%`, backgroundColor: brandColor[b.brand] || '#94A3B8' }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
-
-      {/* ── Rankings ── */}
-      <Card>
-        <SectionHeader title="Rankings" sub={`Sheet 3: top ${Math.min(20, rankings.length)} of ${rankings.length} branches`} />
-        <div className="overflow-x-auto mt-8">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest w-12">#</th>
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Brand</th>
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Branch</th>
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">City</th>
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Rating</th>
-                <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Reviews</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {rankings.slice(0, 20).map((a, i) => (
-                <tr key={a.id} className="hover:bg-slate-50/50 transition-colors cursor-pointer"
-                    onClick={() => setSelectedId(a.id)}>
-                  <td className="py-3 font-black text-slate-400 text-xs">{i + 1}</td>
-                  <td className="py-3">
-                    <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase text-white shadow-sm"
-                          style={{ backgroundColor: brandColor[a.brand] || '#94A3B8' }}>
-                      {a.brand}
-                    </span>
-                  </td>
-                  <td className="py-3 font-black text-slate-900 text-xs">{a.branch_name}</td>
-                  <td className="py-3 text-slate-500 text-xs uppercase tracking-tighter">{a.city || '—'}</td>
-                  <td className="py-3 text-right">
-                    <span className="text-xs font-black text-slate-900">{getBranchRating(a).toFixed(2)} ★</span>
-                  </td>
-                  <td className="py-3 text-right font-black text-slate-900 text-xs">{a.total_reviews_period}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {/* ── Branch Wise Data ── */}
       <Card>
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-          <SectionHeader title="Branch Wise Data" sub={`Sheet 1: ${filtered.length} of ${analytics.length} branches`} />
+          <SectionHeader title="Branch Wise Data" sub={`${filtered.length} ${t('of')} ${analytics.length} ${t('branches')}`} />
           <div className="flex flex-wrap gap-2">
             <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)}
                     className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
-              <option value="All">All Brands</option>
+              <option value="All">{t('All Brands')}</option>
               {brandStats.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
             </select>
             <select value={filterCity} onChange={e => setFilterCity(e.target.value)}
                     className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
-              <option value="All">All Cities</option>
+              <option value="All">{t('All Cities')}</option>
               {stats.cities.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
@@ -449,18 +323,18 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
         </div>
 
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-start text-xs">
             <thead>
               <tr className="border-b border-slate-100">
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Brand</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Branch</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">City</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Peak Time</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Avg ★</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Reviews</th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Brand" /></th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Branch" /></th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="City" /></th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Peak Time" /></th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Avg" /> ★</th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Reviews" /></th>
                 <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">M1/M2/M3</th>
                 <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">5/4/3/2/1 ★</th>
-                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">View</th>
+                <th className="px-2 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="View" /></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -478,15 +352,15 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                   </td>
                   <td className="px-2 py-3 text-slate-500 uppercase tracking-tight">{a.city || '—'}</td>
                   <td className="px-2 py-3 text-slate-600 text-[10px] font-bold">{a.peak_time || '—'}</td>
-                  <td className="px-2 py-3 text-right font-black text-slate-900">{getBranchRating(a).toFixed(2)}</td>
-                  <td className="px-2 py-3 text-right font-black text-slate-900">{a.total_reviews_period}</td>
+                  <td className="px-2 py-3 text-end font-black text-slate-900">{getBranchRating(a).toFixed(2)}</td>
+                  <td className="px-2 py-3 text-end font-black text-slate-900">{a.total_reviews_period}</td>
                   <td className="px-2 py-3 text-center text-[10px] font-bold text-slate-500">
                     {a.month_1_reviews}/{a.month_2_reviews}/{a.month_3_reviews}
                   </td>
                   <td className="px-2 py-3 text-center text-[10px] font-bold text-slate-500">
                     {a.star_5_count}/{a.star_4_count}/{a.star_3_count}/{a.star_2_count}/{a.star_1_count}
                   </td>
-                  <td className="px-2 py-3 text-right">
+                  <td className="px-2 py-3 text-end">
                     <button onClick={() => setSelectedId(a.id)}
                             className="text-[10px] font-black px-2 py-1 rounded-md bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 text-slate-600">
                       View
@@ -510,7 +384,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
             <div>
               <SectionHeader title={selected.branch_name}
-                             sub={`Sheet 5 view · ${selected.brand}${selected.city ? ` · ${selected.city}` : ''}`} />
+                             sub={`${selected.brand}${selected.city ? ` · ${selected.city}` : ''}`} />
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                 <Mini label="Avg Rating" value={getBranchRating(selected).toFixed(2)} unit="★" />
                 <Mini label="Reviews" value={selected.total_reviews_period.toString()} />
@@ -521,17 +395,17 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
               {selected.address && (
                 <p className="text-xs font-medium text-slate-500 mt-4">
                   {selected.address}
-                  {selected.google_maps_link && <a href={selected.google_maps_link} target="_blank" rel="noopener" className="ml-2 text-indigo-500 hover:underline">Open in Maps ↗</a>}
+                  {selected.google_maps_link && <a href={selected.google_maps_link} target="_blank" rel="noopener" className="ms-2 text-indigo-500 hover:underline">Open in Maps ↗</a>}
                 </p>
               )}
               {selected.business_hours && (
                 <p className="text-[11px] font-bold text-slate-400 mt-2 leading-relaxed">
-                  <span className="uppercase tracking-wider mr-2">Hours</span>{selected.business_hours}
+                  <span className="uppercase tracking-wider me-2"><BiInline en="Hours" /></span>{selected.business_hours}
                 </p>
               )}
               {selected.busy_hours_summary && (
                 <p className="text-[11px] font-bold text-slate-400 mt-1 leading-relaxed">
-                  <span className="uppercase tracking-wider mr-2">Busy</span>{selected.busy_hours_summary}
+                  <span className="uppercase tracking-wider me-2"><BiInline en="Busy" /></span>{selected.busy_hours_summary}
                 </p>
               )}
             </div>
@@ -550,7 +424,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                     const hourly = selected.popular_times_grid?.[day] || [];
                     return (
                       <React.Fragment key={day}>
-                        <div className="text-[10px] font-black text-slate-500 uppercase pr-2 flex items-center">{DAY_LABEL[day]}</div>
+                        <div className="text-[10px] font-black text-slate-500 uppercase pe-2 flex items-center">{t(DAY_LABEL[day])}</div>
                         {Array.from({ length: 24 }).map((_, h) => {
                           const v = hourly[h];
                           const alpha = v == null ? 0 : Math.max(0.05, v / 100);
@@ -558,7 +432,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                             <div key={h}
                                  className="aspect-square rounded-[2px] transition-transform hover:scale-150 hover:z-10 cursor-help"
                                  style={{ backgroundColor: v == null ? '#F1F5F9' : `rgba(79, 70, 229, ${alpha})` }}
-                                 title={v == null ? `${DAY_LABEL[day]} ${hourLabel(h)} — no data` : `${DAY_LABEL[day]} ${hourLabel(h)} — ${v}%`} />
+                                 title={v == null ? `${t(DAY_LABEL[day])} ${hourLabel(h)} — ${t('no data')}` : `${t(DAY_LABEL[day])} ${hourLabel(h)} — ${v}%`} />
                           );
                         })}
                       </React.Fragment>
@@ -566,13 +440,13 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                   })}
                 </div>
                 <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  <span>Quiet</span>
+                  <span><BiInline en="Quiet" /></span>
                   <div className="h-1 flex-1 mx-4 bg-gradient-to-r from-slate-100 to-indigo-600 rounded-full" />
-                  <span>Peak</span>
+                  <span><BiInline en="Peak" /></span>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-slate-400 italic">Popular times data not available for this branch.</p>
+              <p className="text-sm text-slate-400 italic"><BiInline en="Popular times data not available for this branch." /></p>
             )}
           </div>
         </Card>
@@ -581,7 +455,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
       {/* ── Reviews for selected branch ── */}
       {selected && selectedReviews.length > 0 && (
         <Card>
-          <SectionHeader title="Reviews for this branch" sub={`Sheet 4 slice — ${selectedReviews.length} reviews`} />
+          <SectionHeader title="Reviews for this branch" sub={`${selectedReviews.length} ${t('reviews')}`} />
           <div className="space-y-3 mt-6">
             {selectedReviews.slice(0, reviewLimit).map(r => (
               <div key={r.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -604,7 +478,7 @@ export default function AnalysisDashboard({ job, data }: DashboardProps) {
                     ))}
                   </div>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">{r.text || <em className="text-slate-400">No comment.</em>}</p>
+                <p className="text-xs text-slate-600 leading-relaxed font-medium">{r.text || <em className="text-slate-400"><BiInline en="No comment." /></em>}</p>
               </div>
             ))}
           </div>
@@ -625,6 +499,8 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return <div className={`p-6 md:p-8 bg-white rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/40 ${className || ''}`}>{children}</div>;
 }
 function SectionHeader({ title, sub }: { title: string; sub: string }) {
+  const t = useT();
+  title = t(title); sub = t(sub);
   return (
     <div>
       <h3 className="text-xl font-black text-slate-900 tracking-tight leading-tight">{title}</h3>
@@ -633,6 +509,8 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
   );
 }
 function KPI({ label, value, sub, color }: any) {
+  const t = useT();
+  label = t(label); sub = typeof sub === 'string' ? t(sub) : sub;
   const palette: Record<string, string> = {
     indigo: 'bg-indigo-600 text-white shadow-indigo-600/20',
     emerald:'bg-emerald-600 text-white shadow-emerald-600/20',
@@ -647,43 +525,16 @@ function KPI({ label, value, sub, color }: any) {
     </div>
   );
 }
-function Seg({ n, t, c, title }: { n: number; t: number; c: string; title: string }) {
-  const pct = (n / t) * 100;
-  if (pct === 0) return null;
-  return <div className="h-full first:rounded-l-lg last:rounded-r-lg transition-all duration-1000"
-              style={{ width: `${pct}%`, backgroundColor: c }} title={`${title}: ${n} (${pct.toFixed(0)}%)`} />;
-}
 function Mini({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  const t = useT();
+  label = t(label);
   return (
     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
       <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</div>
       <div className="text-base font-black text-slate-900 mt-1 leading-none">
-        {value}{unit && <span className="text-xs font-bold text-slate-500 ml-1">{unit}</span>}
+        {value}{unit && <span className="text-xs font-bold text-slate-500 ms-1">{unit}</span>}
       </div>
     </div>
-  );
-}
-function Donut({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  let offset = 0;
-  const C = 2 * Math.PI * 40;
-  return (
-    <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="40" fill="transparent" stroke="#F1F5F9" strokeWidth="12" />
-      {data.map(d => {
-        const pct = d.value / total;
-        const dash = pct * C;
-        const node = (
-          <circle key={d.label} cx="50" cy="50" r="40" fill="transparent"
-                  stroke={d.color} strokeWidth="12"
-                  strokeDasharray={`${dash} ${C - dash}`}
-                  strokeDashoffset={-offset}
-                  className="transition-all duration-1000" />
-        );
-        offset += dash;
-        return node;
-      })}
-    </svg>
   );
 }
 function DownloadIcon() {

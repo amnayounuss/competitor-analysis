@@ -74,7 +74,7 @@ export default function SignupForm() {
         )}
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Full name" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Full name" /></label>
           <input 
             type="text" 
             value={fullName} 
@@ -85,7 +85,7 @@ export default function SignupForm() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Email address" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Email address" /></label>
           <input 
             type="email" 
             required 
@@ -97,7 +97,7 @@ export default function SignupForm() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Password" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Password" /></label>
           <input 
             type="password" 
             required 

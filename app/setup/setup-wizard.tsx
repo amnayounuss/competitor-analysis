@@ -237,9 +237,9 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1">{label}</label>
+      <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1">{label}</label>
       {children}
-      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-widest ml-1">{hint}</p>}
+      {hint && <p className="text-[11px] font-medium text-slate-400 uppercase tracking-widest ms-1">{hint}</p>}
     </div>
   );
 }

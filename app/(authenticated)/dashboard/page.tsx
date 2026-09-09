@@ -77,10 +77,24 @@ export default async function DashboardOverview() {
       // but AI-parsed names/cities may differ across runs causing false duplicates).
       // Competitors: deduplicate across jobs by place_id (preferred) or branch_name+city.
       const rawAnalytics = analyticsRes.data || [];
+
+      /**
+       * Brand names are compared without case or padding.
+       *
+       * The job stores target_name as the client typed it ("Shovel") while the
+       * analytics rows carry the brand the pipeline derived ("shovel"). A
+       * case-sensitive comparison meant the "keep only the latest run" rule
+       * never fired for the client's own branches, so every past run was mixed
+       * into one view — 47 branch rows for a 29-branch business, and totals
+       * that belonged to no single analysis.
+       */
+      const sameBrand = (a?: string | null, b?: string | null) =>
+        String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+
       const branchMap = new Map<string, any>();
       const jobOrder = new Map(allSucceededJobs.map((j: any, i: number) => [j.id, i]));
       for (const a of rawAnalytics) {
-        if (a.brand === targetBrandName && a.job_id !== latestJobId) continue;
+        if (sameBrand(a.brand, targetBrandName) && a.job_id !== latestJobId) continue;
         const key = a.place_id
           ? `${a.brand}::pid::${a.place_id}`
           : `${a.brand}::${a.branch_name}::${a.city || ''}`;
@@ -97,18 +111,32 @@ export default async function DashboardOverview() {
         'egypt': 'eg', 'jordan': 'jo', 'lebanon': 'lb', 'iraq': 'iq',
         'turkey': 'tr', 'pakistan': 'pk', 'india': 'in',
       };
+      /**
+       * The search location never hides the client's own branches.
+       *
+       * It used to be matched as a substring of the address, city or branch
+       * name. A client whose listings are in Arabic typed "RIYADH" and their
+       * own branches vanished from their own dashboard, because
+       * "طريق الملك عبدالله, الرياض, SA" does not contain "riyadh". A city
+       * name in another script can never match, and the location is a hint for
+       * finding competitors, not a filter on the business you own.
+       *
+       * A country still filters — a region code is a code, not prose — and it
+       * still applies to competitors, where a wrong-country result is a real
+       * discovery mistake.
+       */
       const filteredAnalytics = aggregatedAnalytics.filter(a => {
+        if (sameBrand(a.brand, targetBrandName)) return true;
+
         const jobRecord = allSucceededJobs.find(j => j.id === a.job_id);
         const searchLoc = jobRecord?.search_location ? jobRecord.search_location.trim().toLowerCase() : '';
         if (!searchLoc) return true;
 
-        const addr = (a.address || '').toLowerCase();
-        const city = (a.city || '').toLowerCase();
-        const title = (a.branch_name || '').toLowerCase();
         const countryCode = COUNTRY_TO_CODE[searchLoc];
-        const countryMatch = countryCode && (addr.endsWith(`, ${countryCode}`) || addr.endsWith(` ${countryCode}`));
+        if (!countryCode) return true;   // a city tells us nothing we can check
 
-        return addr.includes(searchLoc) || city.includes(searchLoc) || title.includes(searchLoc) || countryMatch;
+        const addr = (a.address || '').toLowerCase();
+        return addr.endsWith(`, ${countryCode}`) || addr.endsWith(` ${countryCode}`);
       });
 
       // Extract all distinct competitor brands across all jobs

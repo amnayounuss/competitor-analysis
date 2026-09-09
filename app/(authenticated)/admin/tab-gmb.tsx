@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { BiInline } from '@/lib/bilingual';
 
 interface Props { settings: any; reload: () => void; }
 
@@ -25,8 +26,8 @@ export default function GmbTab({ settings, reload }: Props) {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Business Profile API</h2>
-        <p className="text-sm text-slate-500 mt-1">Configure the Google Cloud project for local search data extraction.</p>
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight"><BiInline en="Business Profile API" /></h2>
+        <p className="text-sm text-slate-500 mt-1"><BiInline en="Configure the Google Cloud project for local search data extraction." /></p>
       </div>
 
       {msg && (

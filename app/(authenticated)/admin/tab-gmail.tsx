@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { BiInline } from '@/lib/bilingual';
 
 export default function ResendTab(props?: any) {
   const [testEmail, setTestEmail] = useState('');
@@ -32,8 +33,8 @@ export default function ResendTab(props?: any) {
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
       <div>
-        <h2 className="text-2xl font-black text-slate-900 tracking-tight">Email Gateway (Resend)</h2>
-        <p className="text-sm text-slate-500 mt-1">Verify and test your Resend API dispatch configuration.</p>
+        <h2 className="text-2xl font-black text-slate-900 tracking-tight"><BiInline en="Email Gateway (Resend)" /></h2>
+        <p className="text-sm text-slate-500 mt-1"><BiInline en="Verify and test your Resend API dispatch configuration." /></p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -41,7 +42,7 @@ export default function ResendTab(props?: any) {
           <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6 space-y-4">
             <div className="flex items-center gap-3">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-              <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest">Resend Integration Active</h4>
+              <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest"><BiInline en="Resend Integration Active" /></h4>
             </div>
             <p className="text-xs text-emerald-800/80 leading-relaxed">
               Your platform is configured to send analysis reports instantly using the **Resend API**. SMTP dependencies have been completely removed.
@@ -87,7 +88,7 @@ export default function ResendTab(props?: any) {
 
         <div className="space-y-6">
           <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Pro Tip</h4>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2"><BiInline en="Pro Tip" /></h4>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Resend requires a **verified sending domain** to send emails from your own domain. If you are using the free tier or haven't verified a domain, emails will be delivered from <b>onboarding@resend.dev</b>.
             </p>

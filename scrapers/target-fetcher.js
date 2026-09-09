@@ -219,11 +219,21 @@ function convertReview(r) {
   // v4 returns starRating as an enum string: "ONE".."FIVE"
   const map = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
   const stars = map[r.starRating] || null;
+
+  // The owner's reply rides along on the same object as reviewReply.comment
+  // plus reviewReply.updateTime. It was being dropped, and it is what reply
+  // rate and response time are measured from — most reviews on an active
+  // profile have one, so this is core signal rather than an edge case.
+  const reply = r.reviewReply || null;
+
   return {
     stars,
     rating:          stars,
     publishedAtDate: r.createTime || r.updateTime || null,
     text:            (r.comment || "").trim(),
+    reviewerName:    r.reviewer?.displayName || null,
+    replyText:       reply ? (reply.comment || "").trim() : null,
+    repliedAt:       reply ? (reply.updateTime || null) : null,
   };
 }
 
@@ -240,7 +250,7 @@ async function fetchTarget() {
   console.log(`  ✓ ${accounts.length} account(s) found`);
 
   const merged = [];
-  let totalSkippedDup = 0, totalSkippedClosed = 0;
+  let totalSkippedDup = 0, totalSkippedClosed = 0, totalSkippedCountry = 0;
 
   for (const acc of accounts) {
     const locs = await listLocationsForAccount(token, acc.name);
@@ -268,14 +278,30 @@ async function fetchTarget() {
       const mapsUrl = loc.metadata?.mapsUri || mapsUrlFromPlaceId(placeId);
       const phone   = loc.phoneNumbers?.primaryPhone || "";
 
-      if (config.searchLocation) {
-        const searchLoc = config.searchLocation.toLowerCase().trim();
-        const addrLower = address.toLowerCase();
-        const titleLower = title.toLowerCase();
+      /**
+       * Search location narrows the branches you OWN only when it names a
+       * country.
+       *
+       * It used to accept anything and match it as a substring of the address
+       * or title. A client whose listings are in Arabic typed "RIYADH" and 28
+       * of their 29 branches were silently dropped — "طريق الملك عبدالله,
+       * الرياض, SA" does not contain "riyadh" — leaving one branch and 22
+       * reviews where there were 2,459. A city name in the wrong script can
+       * never match, and throwing away your own branches is the worst possible
+       * response to not understanding the input.
+       *
+       * A country still filters, because a client operating in two countries
+       * may legitimately want one of them, and regionCode is a code — not
+       * prose in a particular language. Anything else is treated as a hint for
+       * competitor discovery, which is what it is for; the own-branch list is
+       * every location in the account.
+       */
+      const searchLoc = (config.searchLocation || '').toLowerCase().trim();
+      const expectedCode = COUNTRY_TO_CODE[searchLoc];
+      if (expectedCode) {
         const regionCode = (loc.storefrontAddress?.regionCode || '').toUpperCase();
-        const expectedCode = COUNTRY_TO_CODE[searchLoc];
-        const countryMatch = expectedCode && regionCode === expectedCode;
-        if (!addrLower.includes(searchLoc) && !titleLower.includes(searchLoc) && !countryMatch) {
+        if (regionCode && regionCode !== expectedCode) {
+          totalSkippedCountry++;
           continue;
         }
       }
@@ -344,7 +370,7 @@ async function fetchTarget() {
   const withLocId    = dedupById.filter((b) => b.gmbLocationId).length;
   console.log(`\n  ✓ ${brand}: ${dedupById.length} unique branches | ${withPlaceId} have placeId | ${withHours} have hours (from GMB) | ${withLocId} have a GMB location id (Performance API)`);
   if (totalSkippedDup > 0 || totalSkippedClosed > 0 || crossAcctDup > 0) {
-    console.log(`    skipped: ${totalSkippedDup} Google-flagged duplicates, ${totalSkippedClosed} permanently closed, ${crossAcctDup} cross-account duplicates (same placeId)`);
+    console.log(`    skipped: ${totalSkippedDup} Google-flagged duplicates, ${totalSkippedClosed} permanently closed, ${totalSkippedCountry} in another country, ${crossAcctDup} cross-account duplicates (same placeId)`);
   }
   console.log("  (ratings & review counts will be fetched from the Places API next)\n");
 

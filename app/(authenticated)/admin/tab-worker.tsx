@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { BiInline } from '@/lib/bilingual';
 
 interface Props { settings: any; reload: () => void; }
 
@@ -28,8 +29,8 @@ export default function WorkerTab({ settings, reload }: Props) {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">System behavior</h2>
-        <p className="text-sm text-slate-500 mt-1">Fine-tune the engine and platform-wide permissions.</p>
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight"><BiInline en="System behavior" /></h2>
+        <p className="text-sm text-slate-500 mt-1"><BiInline en="Fine-tune the engine and platform-wide permissions." /></p>
       </div>
 
       {msg && (
@@ -71,7 +72,7 @@ export default function WorkerTab({ settings, reload }: Props) {
               {headless && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
             </div>
             <div>
-              <p className={`font-bold text-sm transition-colors ${headless ? 'text-indigo-900' : 'text-slate-700'}`}>Production Engine</p>
+              <p className={`font-bold text-sm transition-colors ${headless ? 'text-indigo-900' : 'text-slate-700'}`}><BiInline en="Production Engine" /></p>
               <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed italic">
                 Enable headless mode for high-performance scraping.
               </p>
@@ -92,7 +93,7 @@ export default function WorkerTab({ settings, reload }: Props) {
               {signup && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
             </div>
             <div>
-              <p className={`font-bold text-sm transition-colors ${signup ? 'text-indigo-900' : 'text-slate-700'}`}>Public Registrations</p>
+              <p className={`font-bold text-sm transition-colors ${signup ? 'text-indigo-900' : 'text-slate-700'}`}><BiInline en="Public Registrations" /></p>
               <p className="text-[11px] font-medium text-slate-400 mt-0.5 leading-relaxed">
                 Allow new users to create accounts without invitation.
               </p>
@@ -103,7 +104,7 @@ export default function WorkerTab({ settings, reload }: Props) {
 
       <div className="flex items-center justify-between pt-6 border-t border-slate-50">
         <p className="text-xs text-slate-400 italic">
-          <b>Note:</b> Changes propagate within 30s. Some parameters may require a runner restart.
+          <b><BiInline en="Note:" /></b> Changes propagate within 30s. Some parameters may require a runner restart.
         </p>
         <button 
           onClick={save} 

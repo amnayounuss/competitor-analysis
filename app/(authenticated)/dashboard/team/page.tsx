@@ -160,9 +160,9 @@ export default function TeamPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100">
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Name" /></th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Email" /></th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Added" /></th>
+                <th className="px-6 py-4 text-start text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Name" /></th>
+                <th className="px-6 py-4 text-start text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Email" /></th>
+                <th className="px-6 py-4 text-start text-xs font-black text-slate-400 uppercase tracking-wider"><BiInline en="Added" /></th>
                 <th className="px-6 py-4"></th>
               </tr>
             </thead>
@@ -172,7 +172,7 @@ export default function TeamPage() {
                   <td className="px-6 py-4 text-sm font-bold text-slate-700">{v.full_name || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-500">{v.email}</td>
                   <td className="px-6 py-4 text-xs text-slate-400">{new Date(v.created_at).toLocaleDateString()}</td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-6 py-4 text-end">
                     <button
                       onClick={() => remove(v.id, v.email)}
                       className="text-xs font-bold text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-lg transition-colors"

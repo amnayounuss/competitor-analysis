@@ -2,6 +2,7 @@ import React from 'react';
 import { serverClient, adminClient } from '@/lib/supabase';
 import StatusBadge from '../status-badge';
 import StopJobButton from '../stop-job-button';
+import DeleteJobButton from '../delete-job-button';
 import DownloadButton from '../download-button';
 import Link from 'next/link';
 import type { Job } from '@/lib/types';
@@ -82,6 +83,9 @@ export default async function AnalysisHistoryPage() {
                     <div className="flex items-center justify-end gap-2">
                       {j.status === 'succeeded' && j.excel_url && <DownloadButton url={j.excel_url} />}
                       {!isViewer && (j.status === 'running' || j.status === 'queued') && <StopJobButton jobId={j.id} />}
+                      {!isViewer && j.status !== 'running' && j.status !== 'queued' && (
+                        <DeleteJobButton jobId={j.id} targetName={j.target_name} status={j.status} />
+                      )}
                       <Link href={`/jobs/${j.id}`} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
                         <svg className="w-5 h-5 rtl:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
                       </Link>

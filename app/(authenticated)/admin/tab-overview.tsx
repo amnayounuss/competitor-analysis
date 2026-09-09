@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { BiInline } from '@/lib/bilingual';
 
 interface RecentJob {
   id: string;
@@ -54,7 +55,7 @@ export default function OverviewTab() {
     return (
       <div className="flex flex-col items-center justify-center py-24 space-y-4">
         <div className="w-10 h-10 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin" />
-        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Compiling System Intel…</p>
+        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Compiling System Intel…" /></p>
       </div>
     );
   }
@@ -106,10 +107,10 @@ export default function OverviewTab() {
         <div className="lg:col-span-2 space-y-8">
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Live Activity Stream</h3>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest"><BiInline en="Live Activity Stream" /></h3>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Real-time" /></span>
               </div>
             </div>
             
@@ -119,7 +120,7 @@ export default function OverviewTab() {
                   <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 mx-auto mb-4">
                     <DatabaseIcon />
                   </div>
-                  <p className="text-slate-400 font-bold italic">No jobs recorded yet.</p>
+                  <p className="text-slate-400 font-bold italic"><BiInline en="No jobs recorded yet." /></p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-50">
@@ -137,7 +138,7 @@ export default function OverviewTab() {
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">{job.user_email}</p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-end">
                         <div className={`text-[10px] font-black uppercase tracking-widest mb-1 ${
                           job.status === 'succeeded' ? 'text-emerald-500' : 
                           job.status === 'failed' ? 'text-rose-500' : 'text-amber-500'
@@ -188,7 +189,7 @@ export default function OverviewTab() {
             
             <div className="relative z-10 space-y-8">
               <div className="flex items-center justify-between">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Worker Instance</h4>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Worker Instance" /></h4>
                 <div className="px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded-lg text-[9px] font-black uppercase tracking-widest border border-emerald-500/20">
                   Healthy
                 </div>
@@ -197,7 +198,7 @@ export default function OverviewTab() {
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-tight">
-                    <span>Processing Load</span>
+                    <span><BiInline en="Processing Load" /></span>
                     <span>{stats.activeJobs > 0 ? 'High' : 'Idle'}</span>
                   </div>
                   <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
@@ -210,11 +211,11 @@ export default function OverviewTab() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Queue Size</p>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1"><BiInline en="Queue Size" /></p>
                     <p className="text-2xl font-black text-white">{stats.activeJobs}</p>
                   </div>
                   <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Success</p>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1"><BiInline en="Success" /></p>
                     <p className="text-2xl font-black text-emerald-400">{successRate}%</p>
                   </div>
                 </div>
@@ -231,7 +232,7 @@ export default function OverviewTab() {
 
           {/* Setup Coverage Card */}
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 space-y-6 shadow-sm">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Connectivity Coverage</h4>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest"><BiInline en="Connectivity Coverage" /></h4>
             
             <div className="flex items-center gap-6">
               <div className="relative w-20 h-20 shrink-0">
@@ -244,7 +245,7 @@ export default function OverviewTab() {
                 </div>
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-900">Database Ready</p>
+                <p className="text-sm font-bold text-slate-900"><BiInline en="Database Ready" /></p>
                 <p className="text-[10px] font-medium text-slate-500 leading-relaxed">
                   {stats.connectedDBs} of {stats.totalClients} clients have completed their database setup.
                 </p>

@@ -46,6 +46,20 @@ interface BranchAnalytics {
   } | null;
 }
 
+/**
+ * A branch can only be ranked if reviews stand behind its rating.
+ *
+ * The rating can arrive from the Places API even when the Business Profile API
+ * returns no reviews for that location — one branch showed 4.60 stars from
+ * Places, 188 reviews per Google, and nothing fetchable. It was ranked fifth
+ * while its own row read "0 reviews", which is not a ranking, it is a guess
+ * with a number next to it. Branches like that are listed in the table, never
+ * placed in a league.
+ */
+function isRankable(a: BranchAnalytics): boolean {
+  return getBranchRating(a) > 0 && Number(a.total_reviews_period ?? 0) > 0;
+}
+
 function getBranchRating(a: BranchAnalytics): number {
   if (a.branches && typeof a.branches === 'object' && a.branches.stars != null) {
     return Number(a.branches.stars);
@@ -525,7 +539,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
 
   const rankings = useMemo(() =>
     [...analytics]
-      .filter(a => getBranchRating(a) > 0)
+      .filter(isRankable)
       .sort((a, b) => (getBranchRating(b) - getBranchRating(a)) || (b.total_reviews_period - a.total_reviews_period)),
     [analytics],
   );
@@ -624,7 +638,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                   }}
                   className="bg-transparent text-xs font-black text-white focus:outline-none cursor-pointer"
                 >
-                  <option value="" disabled className="text-slate-800">Select specific job...</option>
+                  <option value="" disabled className="text-slate-800">{t('Select specific job...')}</option>
                   {allJobs.map((j: any) => {
                     const dateStr = new Date(j.finished_at).toLocaleDateString(undefined, {
                       month: 'short',
@@ -747,7 +761,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                       </div>
                     </div>
 
-                    <div className="text-right">
+                    <div className="text-end">
                       <div className="text-base font-black text-slate-800 flex items-center justify-end gap-1">
                         <span>{(b.avgRating ?? 0).toFixed(2)}</span>
                         <span className="text-amber-400 text-xs">★</span>
@@ -930,6 +944,24 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
             </table>
           </div>
         </Card>
+
+
+        {/* ── What customers talk about ──
+            The word cloud used to live only in the tabbed view below, which
+            this early return never reaches — so it was generated, stored and
+            never shown to anyone. It belongs on the page a client actually
+            opens. Own reviews only; competitors are excluded. */}
+        {wordCloud && (wordCloud.positive.length > 0 || wordCloud.negative.length > 0) && (
+          <Card>
+            <SectionHeader
+              title={t('What Customers Talk About')}
+              sub={t('AI-read words from your own Google reviews — praise on the left, complaints on the right')}
+            />
+            <div className="mt-6">
+              <ReviewWordCloud data={wordCloud} />
+            </div>
+          </Card>
+        )}
 
       </div>
     );
@@ -1155,71 +1187,9 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
             </div>
           </Card>
 
-          {/* Star Distribution — Premium Donut Portfolio */}
-          <Card>
-            <SectionHeader title={`${t('Brand Sentiment Analysis')}`} sub={`${periodInfo.label}`} />
 
-            <div className="mt-8 grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {brandSummaries.map(b => {
-                const isTarget = b.isTarget;
-                const total = b.totalReviews || 1;
-
-                return (
-                  <div key={b.brand} className={`p-6 rounded-[2rem] border transition-all ${isTarget ? 'bg-slate-900 border-slate-800 shadow-2xl' : 'bg-white border-slate-100 shadow-sm'}`}>
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: b.color }} />
-                        <h4 className={`text-lg font-black tracking-tight ${isTarget ? 'text-white' : 'text-slate-900'}`}>{b.brand}</h4>
-                      </div>
-                      {isTarget && <span className="text-[8px] font-black px-2 py-1 bg-indigo-600 text-white rounded-lg uppercase"><BiInline en="Your Brand" /></span>}
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-center gap-8">
-                      {/* Donut Chart with Center Text */}
-                      <div className="relative shrink-0">
-                        <DonutChart stars={b.stars} color={b.color} size={160} />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                          <div className={`text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1`}>{t('Rating')}</div>
-                          <div className={`text-3xl font-black leading-none ${isTarget ? 'text-white' : 'text-slate-900'}`}>
-                            {b.avgRating?.toFixed(2) || '—'}
-                          </div>
-                          <Star className="w-3 h-3 mt-1.5 opacity-50 fill-current" style={{ color: b.color }} />
-                        </div>
-                      </div>
-
-                      {/* Detailed Legend */}
-                      <div className="flex-1 w-full space-y-2">
-                        {[5, 4, 3, 2, 1].map((star, idx) => {
-                          const count = b.stars[idx];
-                          const pct = (count / total) * 100;
-                          const color = star >= 4 ? '#10B981' : star === 3 ? '#FBBF24' : '#F43F5E';
-
-                          return (
-                            <div key={star} className="flex items-center gap-3">
-                              <div className="flex items-center gap-1 w-8">
-                                <span className={`text-[10px] font-black ${isTarget ? 'text-slate-400' : 'text-slate-500'}`}>{star}</span>
-                                <Star className="w-2.5 h-2.5 fill-current opacity-40" style={{ color }} />
-                              </div>
-                              <div className={`flex-1 h-1.5 rounded-full relative overflow-hidden ${isTarget ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                                <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-full transition-all duration-1000" style={{ width: `${pct}%`, backgroundColor: color, boxShadow: isTarget ? `0 0 8px ${color}40` : 'none' }} />
-                              </div>
-                              <div className="flex items-center gap-2 min-w-[70px] justify-end">
-                                <span className={`text-[10px] font-black ${isTarget ? 'text-white' : 'text-slate-900'}`}>{pct.toFixed(1)}%</span>
-                                <span className="text-[9px] font-bold text-slate-500">({count})</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* ── NEW: Rating Comparison + Review Share ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* ── How each brand rates against the others ── */}
+          <div className="grid grid-cols-1 gap-6">
             <Card>
               <SectionHeader title={`${t('Rating Comparison')}`} sub={`${periodInfo.label}`} />
               <div className="mt-6 space-y-3">
@@ -1246,155 +1216,82 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
               </div>
             </Card>
 
-            <Card>
-              <SectionHeader title={`${t('Review Volume Share')}`} sub={`${periodInfo.label}`} />
-              <div className="mt-6">
-                {(() => {
-                  const totalAll = brandSummaries.reduce((s, b) => s + b.totalReviews, 0) || 1;
-                  return (
-                    <>
-                      <div className="h-6 flex rounded-xl overflow-hidden border border-slate-100 mb-4">
-                        {brandSummaries.map(b => {
-                          const pct = (b.totalReviews / totalAll) * 100;
-                          if (pct < 0.5) return null;
-                          return (
-                            <div key={b.brand} className="h-full transition-all duration-700 cursor-default relative group"
-                              style={{ width: `${pct}%`, backgroundColor: b.color }}
-                              title={`${b.brand}: ${b.totalReviews.toLocaleString()} reviews (${pct.toFixed(1)}%)`}>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="space-y-2">
-                        {brandSummaries.map(b => {
-                          const pct = (b.totalReviews / totalAll) * 100;
-                          return (
-                            <div key={b.brand} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
-                                <span className="text-xs font-black text-slate-700">{b.brand}</span>
-                                {b.isTarget ? (
-                                  <span className="text-[7px] font-black px-1 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase"><BiInline en="Your Brand" /></span>
-                                ) : (
-                                  <span className="text-[7px] font-black px-1 py-0.5 bg-slate-100 text-slate-400 rounded uppercase"><BiInline en="Competitor" /></span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-black text-slate-900">{b.totalReviews.toLocaleString()}</span>
-                                <span className="text-[10px] font-bold text-slate-400 min-w-[40px] text-right">{pct.toFixed(1)}%</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            </Card>
           </div>
 
-          {/* ── NEW: Star Distribution Stacked Comparison ── */}
+
+          {/* Which branches are best and worst — where an owner acts */}
           <Card>
-            <SectionHeader title={`${t('Star Distribution Comparison')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 overflow-x-auto">
-              <div className="flex items-end gap-6 min-w-[400px]" style={{ minHeight: 220 }}>
-                {brandSummaries.map((b, bIdx) => {
-                  const total = b.totalReviews || 1;
-                  const STAR_COLORS = ['#10B981', '#34D399', '#FBBF24', '#FB7185', '#F43F5E'];
+            <SectionHeader
+              title={`${t('Top Performers')} / ${t('Bottom Performers')}`}
+              sub={(() => {
+                const skipped = analytics.filter(a => !isRankable(a)).length;
+                return skipped > 0
+                  ? `${periodInfo.label} · ${skipped} ${t('branches left out — no reviews in this period')}`
+                  : periodInfo.label;
+              })()}
+            />
+            <div className="mt-6">
+              {(() => {
+                const sorted = [...analytics]
+                  .filter(isRankable)
+                  .sort((a, b) => getBranchRating(b) - getBranchRating(a));
+                const top5 = sorted.slice(0, 5);
+                const bottom5 = sorted.slice(-5).reverse();
+                const renderEntry = (a: BranchAnalytics, i: number, variant: 'top' | 'bottom', rank: number) => {
+                  const isTarget = a.brand === targetBrand;
+                  const bgClass = variant === 'top' ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100';
+                  const textClass = variant === 'top' ? 'text-emerald-600' : 'text-rose-600';
                   return (
-                    <div key={b.brand} className="flex-1 flex flex-col items-center gap-2 animate-scale-in" style={{ animationDelay: `${bIdx * 150}ms` }}>
-                      <div className="w-full flex flex-col rounded-xl overflow-hidden border border-slate-100" style={{ height: 180 }}>
-                        {b.stars.map((count, i) => {
-                          const pct = (count / total) * 100;
-                          if (pct < 0.5) return null;
-                          return (
-                            <div key={i} className="w-full transition-all duration-700 flex items-center justify-center cursor-default"
-                              style={{ height: `${pct}%`, backgroundColor: STAR_COLORS[i] }}
-                              title={`${5 - i}★: ${count} (${pct.toFixed(1)}%)`}>
-                              {pct > 8 && <span className="text-[9px] font-black text-white drop-shadow">{pct.toFixed(0)}%</span>}
-                            </div>
-                          );
-                        })}
+                    <div key={a.id} className={`flex items-center gap-2 p-2.5 rounded-lg border ${bgClass} animate-fade-slide-up`} style={{ animationDelay: `${i * 80}ms` }}>
+                      <span className={`text-[10px] font-black ${textClass} w-5`}>#{rank}</span>
+                      <div className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: colorMap[a.brand] || '#94A3B8' }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black text-slate-900 truncate">{getBranchDisplayName(a)}</span>
+                          {isTarget ? (
+                            <span className="text-[7px] font-black px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded-md uppercase whitespace-nowrap"><BiInline en="Your Brand" /></span>
+                          ) : (
+                            <span className="text-[7px] font-black px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-md uppercase whitespace-nowrap"><BiInline en="Competitor" /></span>
+                          )}
+                        </div>
+                        <div className="text-[8px] font-bold text-slate-400 mt-0.5">
+                          <span style={{ color: colorMap[a.brand] }}>{a.brand}</span>
+                          {a.city && <span className="text-slate-300"> · {a.city}</span>}
+                          <span className="text-slate-300"> · {a.total_reviews_period} {t('reviews')}</span>
+                        </div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-[10px] font-black uppercase tracking-tight" style={{ color: b.color }}>{b.brand}</div>
-                        <div className="text-[9px] font-bold text-slate-400">{b.avgRating?.toFixed(2) ?? '—'} ★</div>
-                      </div>
+                      <span className={`text-[11px] font-black ${textClass}`}>{getBranchRating(a).toFixed(2)}★</span>
                     </div>
                   );
-                })}
-              </div>
-              <div className="flex items-center justify-center gap-4 mt-4 pt-3 border-t border-slate-100">
-                {[{ l: '5★', c: '#10B981' }, { l: '4★', c: '#34D399' }, { l: '3★', c: '#FBBF24' }, { l: '2★', c: '#FB7185' }, { l: '1★', c: '#F43F5E' }].map(s => (
-                  <div key={s.l} className="flex items-center gap-1">
-                    <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.c }} />
-                    <span className="text-[9px] font-bold text-slate-500">{s.l}</span>
+                };
+                return (
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <div className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-3">★ Top 5 — Highest Rated</div>
+                      <div className="space-y-2">
+                        {top5.map((a, i) => renderEntry(a, i, 'top', i + 1))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-3">↓ Bottom 5 — Needs Improvement</div>
+                      <div className="space-y-2">
+                        {bottom5.map((a, i) => renderEntry(a, i, 'bottom', sorted.length - 4 + i))}
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
           </Card>
 
-          {/* Monthly Trend — Line Chart (Rating) + Bar Chart (Volume) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <SectionHeader title={`${t('Rating Trend')}`} sub={`${periodInfo.label}`} />
-              <div className="mt-4">
-                <MultiLineChart
-                  series={brandSummaries.map(b => ({
-                    label: b.brand,
-                    data: [...b.monthly].reverse().map(m => m.avg),
-                    color: b.color,
-                  }))}
-                  labels={[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short]}
-                  yMin={Math.max(0, Math.min(...brandSummaries.flatMap(b => b.monthly.map(m => m.avg)).filter(Boolean) as number[]) - 0.5)}
-                  yMax={5}
-                  yLabel="Avg Rating"
-                />
-                <div className="flex flex-wrap justify-center gap-4 mt-3">
-                  {brandSummaries.map(b => (
-                    <span key={b.brand} className="flex items-center gap-2 text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>
-                      <span className="w-4 h-[2px] rounded-full" style={{ backgroundColor: b.color }} />
-                      {b.brand}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </Card>
-
-            <Card>
-              <SectionHeader title={`${t('Review Volume')}`} sub={`${periodInfo.label}`} />
-              <div className="mt-4">
-                <GroupedBarChart
-                  groups={[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short]}
-                  series={brandSummaries.map(b => ({
-                    label: b.brand,
-                    data: [...b.monthly].reverse().map(m => m.reviews),
-                    color: b.color,
-                  }))}
-                  yLabel="Reviews"
-                />
-                <div className="flex flex-wrap justify-center gap-4 mt-3">
-                  {brandSummaries.map(b => (
-                    <span key={b.brand} className="flex items-center gap-2 text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>
-                      <span className="w-3 h-3 rounded-sm shadow-sm" style={{ backgroundColor: b.color }} />
-                      {b.brand}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Branch Rating Distribution — Scatter-like horizontal chart */}
+          {/* Every branch on one scale */}
           <Card>
             <SectionHeader title={`${t('Branch Rating Overview')}`} sub={`${periodInfo.label}`} />
             <div className="mt-6">
               <div className="mt-8 space-y-10">
                 {brandSummaries.map(bs => {
                   const brandBranches = analytics
-                    .filter(a => a.brand === bs.brand && getBranchRating(a) > 0)
+                    .filter(a => a.brand === bs.brand && isRankable(a))
                     .sort((a, b) => getBranchRating(b) - getBranchRating(a));
 
                   if (brandBranches.length === 0) return null;
@@ -1512,233 +1409,31 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
             </div>
           </Card>
 
-          {/* ── NEW: Period-wise Rating Change per Brand ── */}
+          {/* Is the rating moving */}
           <Card>
-            <SectionHeader title={`${t('Rating Change Across Periods')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 space-y-5">
-              {brandSummaries.map((b, bIdx) => {
-                const p3 = b.monthly[2]?.avg;
-                const p2 = b.monthly[1]?.avg;
-                const p1 = b.monthly[0]?.avg;
-                const trend = p1 != null && p3 != null ? p1 - p3 : null;
-                return (
-                  <div key={b.brand} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
-                        <span className="text-xs font-black text-slate-700">{b.brand}</span>
-                      </div>
-                      {trend != null && (
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${trend > 0 ? 'bg-emerald-50 text-emerald-600' : trend < 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-500'}`}>
-                          {trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} {Math.abs(trend).toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {[
-                        { label: periodInfo.p3.short, val: p3, accent: 'slate' },
-                        { label: periodInfo.p2.short, val: p2, accent: 'amber' },
-                        { label: periodInfo.p1.short, val: p1, accent: 'emerald' },
-                      ].map((p, i) => {
-                        const pct = p.val != null ? (p.val / 5) * 100 : 0;
-                        return (
-                          <div key={i} className="flex-1">
-                            <div className="text-[8px] font-bold text-slate-400 mb-1 text-center truncate">{p.label}</div>
-                            <div className="h-7 bg-slate-100 rounded-lg overflow-hidden relative">
-                              <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-lg animate-grow-width flex items-center justify-center"
-                                style={{ width: `${Math.max(pct, 5)}%`, backgroundColor: b.color, opacity: p.accent === 'emerald' ? 1 : p.accent === 'amber' ? 0.7 : 0.45, animationDelay: `${bIdx * 100 + i * 150}ms` }}>
-                                {p.val != null && pct > 20 && <span className="text-[9px] font-black text-white">{p.val.toFixed(2)}</span>}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* ── NEW: Review Growth Trend (period-over-period volume) ── */}
-          <Card>
-            <SectionHeader title={`${t('Review Growth Trend')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 space-y-4">
-              {brandSummaries.map((b, bIdx) => {
-                const reviews = [...b.monthly].reverse().map(m => m.reviews);
-                const maxRev = Math.max(...reviews, 1);
-                return (
-                  <div key={b.brand} className="animate-fade-slide-up" style={{ animationDelay: `${bIdx * 100}ms` }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: b.color }} />
-                      <span className="text-xs font-black text-slate-700">{b.brand}</span>
-                      <span className="text-[10px] font-bold text-slate-400 ml-auto">{b.totalReviews.toLocaleString()} total</span>
-                    </div>
-                    <div className="flex items-end gap-2 h-16">
-                      {[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short].map((label, i) => {
-                        const val = reviews[i] ?? 0;
-                        const hPct = (val / maxRev) * 100;
-                        return (
-                          <div key={i} className="flex-1 flex flex-col items-center">
-                            <div className="w-full flex justify-center">
-                              <div className="w-full max-w-[60px] rounded-t-lg animate-grow-height"
-                                style={{ height: `${Math.max(hPct, 5)}%`, backgroundColor: b.color, opacity: i === 2 ? 1 : i === 1 ? 0.7 : 0.4, animationDelay: `${bIdx * 100 + i * 150}ms` }}>
-                              </div>
-                            </div>
-                            <span className="text-[8px] font-black text-slate-500 mt-1">{val}</span>
-                            <span className="text-[7px] font-bold text-slate-400 truncate max-w-full">{label}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* ── NEW: City-wise Rating Graph (visual bars before table) ── */}
-          <Card>
-            <SectionHeader title={`${t('City-wise Rating Comparison')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 space-y-4">
-              {cityBreakdown.slice(0, 10).map((row, rIdx) => (
-                <div key={row.city} className="animate-fade-slide-up" style={{ animationDelay: `${rIdx * 60}ms` }}>
-                  <div className="text-[10px] font-black text-slate-600 uppercase tracking-tight mb-2">{row.city} <span className="text-slate-400 font-bold">({row.totalBranches} {t('branches')})</span></div>
-                  <div className="flex items-center gap-2">
-                    {brandSummaries.map(bs => {
-                      const cell = row.brands.find(b => b.brand === bs.brand);
-                      if (!cell) return <div key={bs.brand} className="flex-1 h-5 bg-slate-50 rounded" />;
-                      const rating = cell.avgRating ?? 0;
-                      const pct = (rating / 5) * 100;
-                      return (
-                        <div key={bs.brand} className="flex-1">
-                          <div className="h-5 bg-slate-100 rounded-md overflow-hidden relative">
-                            <div className="absolute inset-y-0 ltr:left-0 rtl:right-0 rounded-md animate-grow-width flex items-center justify-end pe-1"
-                              style={{ width: `${pct}%`, backgroundColor: bs.color, animationDelay: `${rIdx * 60 + 200}ms` }}>
-                              <span className="text-[7px] font-black text-white">{rating.toFixed(1)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-3 pt-3 border-t border-slate-100">
-                {brandSummaries.map(bs => (
-                  <div key={bs.brand} className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: bs.color }} />
-                    <span className="text-[9px] font-black text-slate-600">{bs.brand}</span>
-                    {bs.isTarget ? (
-                      <span className="text-[7px] font-black px-1 py-0 bg-indigo-50 text-indigo-500 rounded"><BiInline en="YOUR BRAND" /></span>
-                    ) : (
-                      <span className="text-[7px] font-black px-1 py-0 bg-slate-100 text-slate-400 rounded"><BiInline en="Competitor" /></span>
-                    )}
-                  </div>
+            <SectionHeader title={`${t('Rating Trend')}`} sub={`${periodInfo.label}`} />
+            <div className="mt-4">
+              <MultiLineChart
+                series={brandSummaries.map(b => ({
+                  label: b.brand,
+                  data: [...b.monthly].reverse().map(m => m.avg),
+                  color: b.color,
+                }))}
+                labels={[periodInfo.p3.short, periodInfo.p2.short, periodInfo.p1.short]}
+                yMin={Math.max(0, Math.min(...brandSummaries.flatMap(b => b.monthly.map(m => m.avg)).filter(Boolean) as number[]) - 0.5)}
+                yMax={5}
+                yLabel="Avg Rating"
+              />
+              <div className="flex flex-wrap justify-center gap-4 mt-3">
+                {brandSummaries.map(b => (
+                  <span key={b.brand} className="flex items-center gap-2 text-xs font-black uppercase tracking-tight" style={{ color: b.color }}>
+                    <span className="w-4 h-[2px] rounded-full" style={{ backgroundColor: b.color }} />
+                    {b.brand}
+                  </span>
                 ))}
               </div>
             </div>
           </Card>
-
-          {/* ═══ DATA TABLES (at the end) ═══ */}
-
-          {/* Brand Comparison Table */}
-          <Card>
-            <SectionHeader title={`${t('Brand Comparison')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full text-start text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-start"><BiInline en="Brand" /></th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end">{t('Avg Rating')} ({periodInfo.p1.short})</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end">{t('Reviews')} ({periodInfo.p1.short})</th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Total Branches" /></th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Overall Avg Rating (All Periods)" /></th>
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Overall Total Reviews" /></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {brandSummaries.map(b => (
-                    <tr key={b.brand} className="hover:bg-slate-50/50">
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2 text-start">
-                          <BrandBadge brand={b.brand} color={b.color} />
-                          {b.isTarget && <span className="text-[8px] font-black px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded uppercase"><BiInline en="Your Brand" /></span>}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.currentPeriodAvg?.toFixed(2) ?? '—'} ★</td>
-                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.currentPeriodReviews.toLocaleString()}</td>
-                      <td className="px-3 py-3 text-end font-black text-slate-900">{b.branches}</td>
-                      <td className="px-3 py-3 text-end font-bold text-slate-600">{b.avgRating?.toFixed(2) ?? '—'} ★</td>
-                      <td className="px-3 py-3 text-end font-bold text-slate-600">{b.totalReviews.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* City-wise Data Table */}
-          <Card>
-            <SectionHeader title={`${t('City-wise Brand Performance')}`} sub={`${periodInfo.label}`} />
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full text-start text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-start"><BiInline en="City" /></th>
-                    {brandSummaries.map(b => (
-                      <th key={b.brand} className="px-3 py-3 text-center">
-                        <BrandBadge brand={b.brand} color={b.color} />
-                      </th>
-                    ))}
-                    <th className="px-3 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-end"><BiInline en="Total" /></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {cityBreakdown.map(row => (
-                    <tr key={row.city} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-4 text-start">
-                        <div className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{row.city}</div>
-                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{row.totalBranches} {t('Branches Market')}</div>
-                      </td>
-                      {brandSummaries.map(bs => {
-                        const cell = row.brands.find(b => b.brand === bs.brand);
-                        const rating = cell?.avgRating ?? 0;
-                        return (
-                          <td key={bs.brand} className={`px-4 py-4 text-center ${bs.isTarget ? 'bg-slate-50/50' : ''}`}>
-                            {cell ? (
-                              <div className="flex flex-col items-center">
-                                <div className="text-[11px] font-black text-slate-900 tracking-tight">{rating.toFixed(2)} ★</div>
-                                <div className="text-[9px] font-bold text-slate-500 mt-0.5 uppercase tracking-tighter">{cell.branches} {t('Br')} · {cell.reviews.toLocaleString()} {t('Rev')}</div>
-                              </div>
-                            ) : (
-                              <div className="text-[10px] font-bold text-slate-200">—</div>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className="px-4 py-4 text-end">
-                        <div className="text-[11px] font-black text-slate-500">{row.totalBranches}</div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* ── Review Word Cloud (your own reviews only, competitors excluded) ── */}
-          {wordCloud && (wordCloud.positive.length > 0 || wordCloud.negative.length > 0) && (
-            <Card>
-              <SectionHeader
-                title={`${t('What Customers Talk About')}`}
-                sub={`${t('AI-read words from your own Google reviews — praise on the left, complaints on the right')}`}
-              />
-              <div className="mt-6">
-                <ReviewWordCloud data={wordCloud} />
-              </div>
-            </Card>
-          )}
         </>
       )}
 
@@ -1770,7 +1465,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                           </div>
                           <div className="space-y-1">
                             {brandSummaries.map(bs => {
-                              const brandBranches = analytics.filter(a => a.brand === bs.brand && getBranchRating(a) > 0);
+                              const brandBranches = analytics.filter(a => a.brand === bs.brand && isRankable(a));
                               const bandCount = brandBranches.filter(a => {
                                 const r = getBranchRating(a);
                                 return r >= band.min && r < band.max;
@@ -1782,7 +1477,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                                   <div className="min-w-[80px] flex items-center gap-1.5">
                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: bs.color }} />
                                     <span className="text-[9px] font-black text-slate-500 truncate">{bs.brand}</span>
-                                    {bs.isTarget && <span className="text-[7px] font-black px-1 py-0 bg-indigo-50 text-indigo-500 rounded">YOU</span>}
+                                    {bs.isTarget && <span className="text-[7px] font-black px-1 py-0 bg-indigo-50 text-indigo-500 rounded">{t('YOU')}</span>}
                                   </div>
                                   <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden">
                                     <div className="h-full rounded animate-grow-width flex items-center px-1"
@@ -1790,7 +1485,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                                       {pct > 15 && <span className="text-[8px] font-black text-white">{bandCount}</span>}
                                     </div>
                                   </div>
-                                  <span className="text-[9px] font-black text-slate-400 min-w-[55px] text-right">{bandCount} ({pct.toFixed(0)}%)</span>
+                                  <span className="text-[9px] font-black text-slate-400 min-w-[55px] text-end">{bandCount} ({pct.toFixed(0)}%)</span>
                                 </div>
                               );
                             })}
@@ -1813,11 +1508,19 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
             </Card>
 
             <Card>
-              <SectionHeader title={`${t('Top Performers')} / ${t('Bottom Performers')}`} sub={`${periodInfo.label}`} />
+              <SectionHeader
+              title={`${t('Top Performers')} / ${t('Bottom Performers')}`}
+              sub={(() => {
+                const skipped = analytics.filter(a => !isRankable(a)).length;
+                return skipped > 0
+                  ? `${periodInfo.label} · ${skipped} ${t('branches left out — no reviews in this period')}`
+                  : periodInfo.label;
+              })()}
+            />
               <div className="mt-6">
                 {(() => {
                   const sorted = [...analytics]
-                    .filter(a => getBranchRating(a) > 0)
+                    .filter(isRankable)
                     .sort((a, b) => getBranchRating(b) - getBranchRating(a));
                   const top5 = sorted.slice(0, 5);
                   const bottom5 = sorted.slice(-5).reverse();
@@ -1844,20 +1547,20 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                             <span className="text-slate-300"> · {a.total_reviews_period} {t('reviews')}</span>
                           </div>
                         </div>
-                        <span className={`text-[11px] font-black ${textClass}`}>{getBranchRating(a).toFixed(2)}★</span>
+                        <span className={`text-[11px] font-black ${textClass}`}>{getBranchRating(a) > 0 ? getBranchRating(a).toFixed(2) + '★' : '—'}</span>
                       </div>
                     );
                   };
                   return (
                     <div className="grid grid-cols-1 gap-4">
                       <div>
-                        <div className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-3">★ Top 5 — Highest Rated</div>
+                        <div className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-3">★ {t('Top 5 — Highest Rated')}</div>
                         <div className="space-y-2">
                           {top5.map((a, i) => renderEntry(a, i, 'top', i + 1))}
                         </div>
                       </div>
                       <div>
-                        <div className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-3">↓ Bottom 5 — Needs Improvement</div>
+                        <div className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-3">↓ {t('Bottom 5 — Needs Improvement')}</div>
                         <div className="space-y-2">
                           {bottom5.map((a, i) => renderEntry(a, i, 'bottom', sorted.length - 4 + i))}
                         </div>
@@ -1919,15 +1622,15 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                 )}
                 <select value={filterBrand} onChange={e => setFilterBrand(e.target.value)}
                   className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
-                  <option value="All">All Brands</option>
+                  <option value="All">{t('All Brands')}</option>
                   {brandSummaries.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
                 </select>
                 <select value={filterCity} onChange={e => setFilterCity(e.target.value)}
                   className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20">
-                  <option value="All">All Cities</option>
+                  <option value="All">{t('All Cities')}</option>
                   {cities.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <input type="text" placeholder="Search branch..." value={search} onChange={e => setSearch(e.target.value)}
+                <input type="text" placeholder={t('Search branch...')} value={search} onChange={e => setSearch(e.target.value)}
                   className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 w-44" />
               </div>
             </div>
@@ -1970,7 +1673,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                     <tr key={a.id} className={`hover:bg-slate-50/50 transition-colors ${selectedId === a.id ? 'bg-indigo-50/40' : ''}`}>
                       {canEdit && (
                         <td className="px-2 py-3 text-center">
-                          <button type="button" title="Delete branch" disabled={branchBusy}
+                          <button type="button" title={t('Delete branch')} disabled={branchBusy}
                             onClick={() => handleDeleteBranch(a.id, getBranchDisplayName(a))}
                             className="text-rose-500 hover:text-rose-700 font-black disabled:opacity-40 text-sm leading-none">✕</button>
                         </td>
@@ -1990,7 +1693,7 @@ export default function DashboardView({ data, isGlobalDashboard = false, canEdit
                       <td className="px-2 py-3 text-[10px] text-slate-600 whitespace-nowrap">{a.phone || '—'}</td>
                       <td className="px-2 py-3 text-[10px] font-bold text-slate-600 whitespace-nowrap">{a.peak_time || '—'}</td>
                       <td className="px-2 py-3 text-[10px] text-slate-500 max-w-[140px] truncate" title={a.busy_hours_summary || ''}>{a.busy_hours_summary || '—'}</td>
-                      <td className="px-2 py-3 text-end font-black text-slate-900">{getBranchRating(a).toFixed(2)}</td>
+                      <td className="px-2 py-3 text-end font-black text-slate-900">{getBranchRating(a) > 0 ? getBranchRating(a).toFixed(2) : '—'}</td>
                       <td className="px-2 py-3 text-end font-black text-slate-900">{a.total_reviews_period}</td>
                       <td className="px-2 py-3 text-end text-slate-700 font-bold">{a.period_1_reviews}</td>
                       <td className="px-2 py-3 text-end text-slate-500">{a.period_1_avg_rating?.toFixed(2) ?? '—'}</td>
@@ -2576,7 +2279,7 @@ function MarkdownRenderer({ text }: { text: string }) {
       flushList(idx);
       const content = trimmed.replace(/^>\s*/, '');
       renderedElements.push(
-        <blockquote key={idx} className="border-l-4 border-indigo-500 bg-indigo-50/40 px-4 py-3 my-4 rounded-r-xl text-slate-700 text-sm font-medium leading-relaxed italic text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />
+        <blockquote key={idx} className="border-l-4 border-indigo-500 bg-indigo-50/40 px-4 py-3 my-4 rounded-e-xl text-slate-700 text-sm font-medium leading-relaxed italic text-center" dangerouslySetInnerHTML={{ __html: parseInlineStyles(content) }} />
       );
     } else if (trimmed === '') {
       flushList(idx);
@@ -3013,7 +2716,7 @@ function Seg({ n, t, c }: { n: number; t: number; c: string }) {
   const pct = (n / t) * 100;
   if (pct === 0) return null;
   return (
-    <div className="h-full first:rounded-l-lg last:rounded-r-lg transition-all duration-700"
+    <div className="h-full first:rounded-s-lg last:rounded-e-lg transition-all duration-700"
       style={{ width: `${pct}%`, backgroundColor: c }}
       title={`${n} (${pct.toFixed(0)}%)`} />
   );
@@ -3024,7 +2727,7 @@ function Mini({ label, value, unit }: { label: string; value: string; unit?: str
     <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
       <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</div>
       <div className="text-sm font-black text-slate-900 mt-1 leading-none">
-        {value}{unit && <span className="text-xs font-bold text-slate-500 ml-1">{unit}</span>}
+        {value}{unit && <span className="text-xs font-bold text-slate-500 ms-1">{unit}</span>}
       </div>
     </div>
   );

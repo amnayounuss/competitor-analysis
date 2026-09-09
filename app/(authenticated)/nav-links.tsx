@@ -35,7 +35,9 @@ export default function NavLinks({ role }: { role: 'admin' | 'client' | 'viewer'
     return (
       <nav className="space-y-1.5">
         <NavItem href="/dashboard" icon={<LayoutIcon />} label="Overview" labelAr={t('Overview')} active={pathname === '/dashboard'} />
+        <NavItem href="/dashboard/advisor" icon={<AdvisorIcon />} label="Advisor" labelAr={t('Advisor')} active={pathname === '/dashboard/advisor'} />
         <NavItem href="/dashboard/performance" icon={<PulseIcon />} label="Profile Performance" labelAr={t('Profile Performance')} active={pathname === '/dashboard/performance'} />
+        <NavItem href="/dashboard/competitors" icon={<TargetIcon />} label="Competitors" labelAr={t('Competitors')} active={pathname === '/dashboard/competitors'} />
         <NavItem href="/dashboard/jobs" icon={<ListIcon />} label="Analysis History" labelAr={t('Analysis History')} active={pathname.startsWith('/dashboard/jobs') || pathname.startsWith('/jobs')} />
       </nav>
     );
@@ -44,7 +46,9 @@ export default function NavLinks({ role }: { role: 'admin' | 'client' | 'viewer'
   return (
     <nav className="space-y-1.5">
       <NavItem href="/dashboard" icon={<LayoutIcon />} label="Overview" labelAr={t('Overview')} active={pathname === '/dashboard'} />
+      <NavItem href="/dashboard/advisor" icon={<AdvisorIcon />} label="Advisor" labelAr={t('Advisor')} active={pathname === '/dashboard/advisor'} />
       <NavItem href="/dashboard/performance" icon={<PulseIcon />} label="Profile Performance" labelAr={t('Profile Performance')} active={pathname === '/dashboard/performance'} />
+      <NavItem href="/dashboard/competitors" icon={<TargetIcon />} label="Competitors" labelAr={t('Competitors')} active={pathname === '/dashboard/competitors'} />
       <NavItem href="/dashboard/new" icon={<PlusIcon />} label="New Analysis" labelAr={t('New Analysis')} active={pathname === '/dashboard/new'} />
       <NavItem href="/dashboard/jobs" icon={<ListIcon />} label="Analysis History" labelAr={t('Analysis History')} active={pathname.startsWith('/dashboard/jobs') || pathname.startsWith('/jobs')} />
       <NavItem href="/schedules" icon={<ClockIcon />} label="Schedules" labelAr={t('Schedules')} active={pathname === '/schedules'} />
@@ -80,5 +84,14 @@ function CpuIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 
 function LayoutIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>; }
 function PlusIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>; }
 function ListIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>; }
+function TargetIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" strokeWidth="2" /><circle cx="12" cy="12" r="4.5" strokeWidth="2" /><circle cx="12" cy="12" r="1" strokeWidth="2" /></svg>; }
 function PulseIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12h4l2-6 3 12 3-8 2 2h4" /></svg>; }
 function ClockIcon() { return <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>; }
+
+function AdvisorIcon() {
+  return (
+    <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+    </svg>
+  );
+}

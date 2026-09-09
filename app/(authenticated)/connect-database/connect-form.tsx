@@ -103,7 +103,7 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
           )}
 
           <div className="space-y-1.5">
-            <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Anthropic API Key" /></label>
+            <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Anthropic API Key" /></label>
             <input
               type="password"
               value={anthropicKey}
@@ -111,7 +111,7 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
               placeholder="sk-ant-api03-••••••••"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-300 shadow-sm"
             />
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ms-1">
               <BiInline en={existingAnthropicKey ? 'Key stored — leave blank to keep current' : 'Used for AI branch naming & city normalization'} />
             </p>
           </div>
@@ -149,7 +149,7 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500" dir={isAr ? 'rtl' : 'ltr'}>
       <div className="space-y-6">
         <div className="space-y-1.5">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Supabase URL" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Supabase URL" /></label>
           <input
             type="text"
             value={url}
@@ -160,7 +160,7 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
         </div>
 
         <div className="space-y-1.5">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Service Role Key" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Service Role Key" /></label>
           <div className="relative group">
             <input
               type="password"
@@ -170,13 +170,13 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-300 shadow-sm"
             />
           </div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ms-1">
             <BiInline en="Settings → API → 'service_role' (secret)" />
           </p>
         </div>
 
         <div className="space-y-1.5">
-          <label className="block text-sm font-bold text-slate-700 tracking-tight ml-1"><BiInline en="Anthropic API Key" /></label>
+          <label className="block text-sm font-bold text-slate-700 tracking-tight ms-1"><BiInline en="Anthropic API Key" /></label>
           <input
             type="password"
             value={anthropicKey}
@@ -184,7 +184,7 @@ export default function ConnectDbForm({ existingUrl, existingAnthropicKey, schem
             placeholder="sk-ant-api03-••••••••"
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-300 shadow-sm"
           />
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ms-1">
             <BiInline en={existingAnthropicKey ? 'Key stored — leave blank to keep current' : 'Used for AI branch naming & city normalization'} />
           </p>
         </div>

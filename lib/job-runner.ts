@@ -18,6 +18,7 @@ import type { Job } from './types';
 import { buildJobConfig } from '../scrapers/build-config';
 import { parseAddressesWithClaude, expandSearchQueries, verifyChainBranches } from './anthropic';
 import { extractReviewWordsForJob } from './review-word-ai';
+import { scoreReviewsForJob } from './review-sentiment';
 import { getClientAnthropicKey, getClientApifyToken } from './client-db';
 
 import {
@@ -76,7 +77,14 @@ export async function runJob(job: Job): Promise<void> {
     const creds = await getClientDbCreds(job.user_id);
     const test = await testClientDb(creds);
     if (!test.ok) throw new Error('Client DB unreachable: ' + (test.error || 'unknown'));
-    if (!test.schemaReady) throw new Error('Client schema missing — run client-schema.sql in your DB');
+    if (!test.schemaReady) {
+      // testClientDb already knows which tables failed and why. Throwing a
+      // fixed sentence instead threw that away, and diagnosing one failure
+      // meant reproducing the probe by hand.
+      throw new Error(
+        'Client schema not usable: ' + (test.error || 'unknown')
+        + ` (schema ${creds.schema_name || 'cloud'})`);
+    }
     const cdb = clientDbClient(creds);
     await log('info', 'Client database connection OK');
 
@@ -433,8 +441,11 @@ export async function runJob(job: Job): Promise<void> {
     await checkCancellation();
     await setProgress(90, 'Stage W: review word clouds');
     try {
+      // null, not this job: the client's own reviews come from the Business
+      // Profile sync and carry no job id, so scoping to the job labelled
+      // nothing at all.
       const wc = await extractReviewWordsForJob({
-        cdb, jobId: job.id, anthropicKey: clientAiKey, log,
+        cdb, jobId: null, anthropicKey: clientAiKey, log,
       });
       if (wc.keyProblem) {
         // The client's own key is the blocker — tell them, in a notification
@@ -454,6 +465,36 @@ export async function runJob(job: Job): Promise<void> {
       }
     } catch (err: any) {
       await log('warn', `Stage W failed: ${err.message} — word clouds may be incomplete`);
+    }
+
+    // ── Stage S — per-review sentiment ──
+    // Scores the client's own reviews 0-100 from their text, through whichever
+    // AI provider their key belongs to. This is what the Branch Health module
+    // plots against the star rating: the two disagree often, and the gap is the
+    // part a rating average hides.
+    await checkCancellation();
+    await setProgress(91, 'Stage S: review sentiment');
+    try {
+      const s = await scoreReviewsForJob({
+        cdb, jobId: job.id, aiKey: clientAiKey,
+        log: async (level, message) => { await log(level, message); },
+      });
+      if (s.keyProblem) {
+        await notify({
+          userId: job.user_id, jobId: job.id, kind: 'ai_key_problem',
+          title: 'AI key needs attention',
+          body: s.keyProblem.message,
+        });
+      } else if (s.scored > 0) {
+        await log('info', `Stage S — ${s.scored} reviews scored via ${s.provider} (${s.model})`);
+      } else {
+        await log('info', 'Stage S — no new reviews to score');
+      }
+      if (s.failedBatches > 0) {
+        await log('warn', `Stage S — ${s.failedBatches} batch(es) failed; those reviews stay unscored and will be retried next run`);
+      }
+    } catch (err: any) {
+      await log('warn', `Stage S failed: ${err.message} — Branch Health will fall back to star ratings`);
     }
 
     // ── Stage G — upload files to client Storage ──
@@ -663,15 +704,62 @@ async function pushDataToClientDb(
   await cdb.from('reviews').delete().eq('job_id', jobId);
   await cdb.from('branches').delete().eq('job_id', jobId);
 
+  /**
+   * A location already known to this client keeps its existing row.
+   *
+   * The standalone review sync writes branches with no job attached; an
+   * analysis writes its own set keyed by job_id. Both mark the client's own
+   * branches is_target, so a client who had synced and then ran an analysis
+   * ended up with two rows and two review sets per location — every figure on
+   * the dashboard doubled. The sync's corpus is the complete one (an analysis
+   * only covers its window), so the analysis attaches to those rows instead of
+   * making rivals for them.
+   */
+  const existingByLocation = new Map<string, any>();
+  const existingByPlace = new Map<string, any>();
+  {
+    const { data: known } = await cdb
+      .from('branches').select('id, brand, branch_name, place_id, gmb_location_id')
+      .is('job_id', null);
+    for (const b of known || []) {
+      if (b.gmb_location_id) existingByLocation.set(String(b.gmb_location_id), b);
+      if (b.place_id) existingByPlace.set(String(b.place_id), b);
+    }
+  }
+  const matchExisting = (r: any) =>
+    (r.gmb_location_id && existingByLocation.get(String(r.gmb_location_id)))
+    || (r.place_id && existingByPlace.get(String(r.place_id)))
+    || null;
+
+  const reused: any[] = [];
+  const freshRows: any[] = [];
+  for (const r of branchRows) {
+    const hit = matchExisting(r);
+    if (hit) {
+      // Refresh the details Google may have changed, but leave brand alone:
+      // the sync's label is canonicalised across the whole account, and
+      // detectBrand only sees one name at a time.
+      const { brand, is_target, job_id, ...rest } = r as any;
+      await cdb.from('branches').update(rest).eq('id', hit.id);
+      reused.push({ ...hit, ...rest, brand: hit.brand });
+    } else {
+      freshRows.push(r);
+    }
+  }
+  if (reused.length) {
+    console.log(`[job:${jobId}] reusing ${reused.length} existing branch row(s) instead of duplicating them`);
+  }
+
   // Insert branches; gracefully drop optional columns the client schema may not
   // have yet (place_id, store_name) by retrying without whichever the error names.
   const stripCols = (rows: any[], cols: string[]) =>
     rows.map(r => { const c = { ...r }; for (const k of cols) delete c[k]; return c; });
-  let rowsToInsert = branchRows;
+  let rowsToInsert = freshRows;
   let selectCols = 'id, branch_name, brand, place_id, gmb_location_id';
   let insertedBranches: any[] | null = null;
   let branchErr: any = null;
   for (let attempt = 0; attempt < 4; attempt++) {
+    if (rowsToInsert.length === 0) { insertedBranches = []; branchErr = null; break; }
     ({ data: insertedBranches, error: branchErr } = await cdb
       .from('branches').insert(rowsToInsert).select(selectCols));
     if (!branchErr) break;
@@ -693,17 +781,36 @@ async function pushDataToClientDb(
   // four "King Fahd Road" branches in different cities → never key by name).
   const branchIdByPid = new Map<string, string>();
   const branchIdByName = new Map<string, string>();
-  for (const b of insertedBranches || []) {
+  for (const b of [...reused, ...(insertedBranches || [])]) {
     if (b.place_id) branchIdByPid.set(b.place_id, b.id);
     if (!branchIdByName.has(`${b.brand}|${b.branch_name}`)) branchIdByName.set(`${b.brand}|${b.branch_name}`, b.id);
   }
   const branchIdFor = (brand: string, name: string, placeId?: string | null): string | undefined =>
     (placeId && branchIdByPid.get(placeId)) || branchIdByName.get(`${brand}|${name}`);
 
+  /**
+   * Branches whose reviews already come from the standalone sync.
+   *
+   * Reusing the branch row stopped the branches duplicating but not the
+   * reviews: the analysis went on writing its own scraped window onto the same
+   * branch, so a synced client ended up with two review sets — 14,912 rows
+   * where there were 7,143 — and every count doubled. The scraped copy is the
+   * lesser one: it carries no Google review id (so it cannot dedupe) and no
+   * owner replies, and it covers only the job's window. The sync owns the
+   * client's own reviews; the analysis still writes competitors', because
+   * nothing else can.
+   */
+  const syncOwnedBranchIds = new Set(reused.map((b: any) => String(b.id)));
+
   // Reviews — flatten across all places
   const reviewRows: any[] = [];
+  let skippedSynced = 0;
   for (const p of rawPlaces) {
     const branchId = branchIdFor(detectBrand(p), p.title, p.placeId || p.place_id);
+    if (branchId && syncOwnedBranchIds.has(String(branchId))) {
+      skippedSynced += (p.reviews || []).length;
+      continue;
+    }
     for (const r of p.reviews || []) {
       reviewRows.push({
         job_id: jobId,
@@ -713,16 +820,37 @@ async function pushDataToClientDb(
         text: r.text || r.comment || r.review_text || null,
         reviewer_name: r.name || r.author || r.author_name || r.reviewerName || 'Anonymous',
         published_at: r.publishedAtDate || r.published_at || r.time || null,
+        // Owner replies come from the Business Profile API and drive reply rate
+        // and response time on the Branch Health module. Only the client's own
+        // reviews carry them — scraped competitor reviews never will.
+        reply_text: r.replyText || null,
+        replied_at: r.repliedAt || null,
       });
     }
   }
 
+  if (skippedSynced > 0) {
+    console.log(`[job:${jobId}] skipped ${skippedSynced} scraped review(s) for branches whose reviews come from the Business Profile sync`);
+  }
+
   if (reviewRows.length > 0) {
-    // Insert in chunks of 500 to avoid Supabase request size limits
+    // Insert in chunks of 500 to avoid Supabase request size limits. Drop the
+    // reply columns if the client schema predates migration 010 rather than
+    // failing the whole job over an optional field.
+    let replyColsOk = true;
     for (let i = 0; i < reviewRows.length; i += 500) {
-      const chunk = reviewRows.slice(i, i + 500);
-      const { error } = await cdb.from('reviews').insert(chunk);
+      let chunk = reviewRows.slice(i, i + 500);
+      if (!replyColsOk) chunk = chunk.map(({ reply_text, replied_at, ...rest }) => rest);
+      let { error } = await cdb.from('reviews').insert(chunk);
+      if (error && replyColsOk && /reply_text|replied_at/.test(error.message || '')) {
+        replyColsOk = false;
+        chunk = chunk.map(({ reply_text, replied_at, ...rest }) => rest);
+        ({ error } = await cdb.from('reviews').insert(chunk));
+      }
       if (error) throw new Error('Failed inserting reviews: ' + error.message);
+    }
+    if (!replyColsOk) {
+      console.warn('[reviews] reply columns absent — run client migration 010 to capture owner replies');
     }
   }
 

@@ -17,10 +17,27 @@ export interface ClientDbCreds {
   schema_name: string | null;
 }
 
-export async function getClientAnthropicKey(userId: string): Promise<string | null> {
+/**
+ * The client's AI key, whichever provider it belongs to.
+ *
+ * ai_api_key is the current column; anthropic_api_key is read as a fallback so
+ * a client who set a key before OpenAI support was added keeps working. The
+ * provider is never stored — lib/ai-provider.ts infers it from the key, so the
+ * two can never disagree.
+ */
+export async function getClientAiKey(userId: string): Promise<string | null> {
   const sb = adminClient();
-  const { data } = await sb.from('client_databases').select('anthropic_api_key').eq('user_id', userId).single();
-  return data?.anthropic_api_key || null;
+  const { data } = await sb
+    .from('client_databases')
+    .select('ai_api_key, anthropic_api_key')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return data?.ai_api_key || data?.anthropic_api_key || null;
+}
+
+/** @deprecated Use getClientAiKey — the key may be OpenAI's, not Anthropic's. */
+export async function getClientAnthropicKey(userId: string): Promise<string | null> {
+  return getClientAiKey(userId);
 }
 
 /**

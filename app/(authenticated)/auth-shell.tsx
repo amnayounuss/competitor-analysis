@@ -31,7 +31,7 @@ export default function AuthShell({
   }, [pathname]);
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC]" dir={isAr ? 'rtl' : 'ltr'}>
+    <div className="print-root flex h-screen bg-[#F8FAFC]" dir={isAr ? 'rtl' : 'ltr'}>
       {/* Mobile Backdrop */}
       {sidebarOpen && (
         <div
@@ -96,13 +96,13 @@ export default function AuthShell({
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <main className="print-main flex-1 flex flex-col overflow-hidden min-w-0">
         <header className={`h-16 md:h-20 bg-white border-b border-slate-200 px-4 md:px-8 flex items-center justify-between z-10 shrink-0`} dir={isAr ? 'rtl' : 'ltr'}>
           <div className="flex items-center gap-3">
             {/* Hamburger — mobile only */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden p-2 -ml-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition-colors"
+              className="md:hidden p-2 -ms-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -120,7 +120,7 @@ export default function AuthShell({
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto" dir={isAr ? 'rtl' : 'ltr'}>
+        <div className="print-scroll flex-1 overflow-auto" dir={isAr ? 'rtl' : 'ltr'}>
           {children}
         </div>
       </main>

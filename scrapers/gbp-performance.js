@@ -59,8 +59,8 @@ function getJson(path, accessToken) {
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
+          try { resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(data) }); }
+          catch { resolve({ status: res.statusCode, headers: res.headers, body: data }); }
         });
       }
     );
@@ -177,22 +177,69 @@ async function fetchPerformance(branches, opts = {}) {
   const results = [];
   const notEnabled = new Map();   // metric → count of locations that reject it
   let done = 0, failed = 0, emptied = 0;
+  let throttled = 0;
   let idx = 0;
-  const POOL = 5;
+  const POOL = 3;
+  const MAX_ATTEMPTS = 5;
+
+  // Google meters this API per minute across the whole project, so a 429 is not
+  // about one request — the quota is spent and every in-flight worker is about
+  // to be refused too. One shared gate holds all of them until the window
+  // reopens; retrying per-request instead just burns the next window as well,
+  // which is how a single click turned into hundreds of 429s.
+  let gateUntil = 0;
+  const holdAll = (ms) => { gateUntil = Math.max(gateUntil, Date.now() + ms); };
+  async function waitForGate() {
+    while (Date.now() < gateUntil) await sleep(Math.min(2000, gateUntil - Date.now()));
+  }
+
+  /** Seconds Google asked us to wait, if it said. */
+  const retryAfterMs = (res) => {
+    const h = res && res.headers && res.headers["retry-after"];
+    const n = h ? Number(h) : NaN;
+    return Number.isFinite(n) && n > 0 ? Math.min(n * 1000, 90_000) : 0;
+  };
 
   async function worker() {
     while (idx < tasks.length) {
       const { b, metric } = tasks[idx++];
       if (config.__check) await config.__check();
 
-      let res;
-      try {
-        res = await getJson(buildPath(b.gmbLocationId, metric, range), token);
-      } catch (err) {
-        failed++;
-        console.warn(`[gbp-perf] ${b.gmbLocationId} ${metric}: ${err.message}`);
-        continue;
+      let res = null;
+      let attempt = 0;
+      let giveUp = false;
+
+      while (attempt < MAX_ATTEMPTS) {
+        await waitForGate();
+        attempt++;
+        try {
+          res = await getJson(buildPath(b.gmbLocationId, metric, range), token);
+        } catch (err) {
+          if (attempt >= MAX_ATTEMPTS) {
+            failed++;
+            console.warn(`[gbp-perf] ${b.gmbLocationId} ${metric}: ${err.message}`);
+            giveUp = true;
+            break;
+          }
+          await sleep(1000 * attempt);
+          continue;
+        }
+
+        if (res.status === 429 || res.status >= 500) {
+          // 4s, 8s, 16s, 32s — or whatever Retry-After says, which wins.
+          const wait = retryAfterMs(res) || Math.min(4000 * 2 ** (attempt - 1), 60_000);
+          if (attempt === 1) throttled++;
+          holdAll(wait);
+          if (attempt >= MAX_ATTEMPTS) {
+            failed++;
+            console.warn(`[gbp-perf] ${b.gmbLocationId} ${metric} → HTTP ${res.status} after ${attempt} attempts`);
+            giveUp = true;
+          }
+          continue;
+        }
+        break;
       }
+      if (giveUp) continue;
 
       if (res.status === 403 || res.status === 400) {
         // Metric not available for this business category, or the account has
@@ -200,12 +247,6 @@ async function fetchPerformance(branches, opts = {}) {
         // once per metric instead of logging N times.
         notEnabled.set(metric, (notEnabled.get(metric) || 0) + 1);
         continue;
-      }
-      if (res.status === 429 || res.status >= 500) {
-        await sleep(1500);
-        try {
-          res = await getJson(buildPath(b.gmbLocationId, metric, range), token);
-        } catch { failed++; continue; }
       }
       if (res.status !== 200) {
         failed++;
@@ -234,7 +275,8 @@ async function fetchPerformance(branches, opts = {}) {
   await Promise.all(Array.from({ length: Math.min(POOL, tasks.length) }, worker));
 
   const totalPoints = results.reduce((s, r) => s + r.series.length, 0);
-  console.log(`[gbp-perf] ${results.length} series, ${totalPoints} daily data points | ${emptied} empty | ${failed} failed`);
+  console.log(`[gbp-perf] ${results.length} series, ${totalPoints} daily data points | ${emptied} empty | ${failed} failed`
+    + (throttled ? ` | ${throttled} hit the per-minute quota and were retried` : ""));
   for (const [metric, n] of notEnabled) {
     console.log(`[gbp-perf] ${metric}: not available for ${n} location(s) — skipped`);
   }

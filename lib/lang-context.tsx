@@ -1,8 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { LANG_COOKIE, LANG_COOKIE_MAX_AGE, type Lang } from './lang-cookie';
 
-type Lang = 'en' | 'ar';
+
 
 interface LangContextType {
   lang: Lang;
@@ -16,13 +17,41 @@ export function useLang() {
   return useContext(LangContext);
 }
 
-export function LangProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('app-lang') as Lang) || 'en';
+function readCookieLang(): Lang | null {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(/(?:^|;\s*)app-lang=(en|ar)\b/);
+  return m ? (m[1] as Lang) : null;
+}
+
+export function LangProvider({ children, initialLang }: {
+  children: React.ReactNode;
+  /**
+   * The language the server already rendered with, read from the cookie.
+   *
+   * Deriving it from localStorage during the first render instead made the
+   * server emit English and the browser emit Arabic, which React reported as
+   * hydration errors (#418/#423/#425) and recovered from by throwing the
+   * server's HTML away — on every page load an Arabic user made.
+   */
+  initialLang?: Lang;
+}) {
+  const [lang, setLang] = useState<Lang>(initialLang ?? 'en');
+
+  // Older sessions stored the choice in localStorage only; move it to the
+  // cookie once so the server can honour it from the next request onwards.
+  useEffect(() => {
+    if (initialLang) return;
+    let stored: Lang | null = readCookieLang();
+    if (!stored) {
+      try { stored = (localStorage.getItem(LANG_COOKIE) as Lang) || null; } catch { stored = null; }
+      if (stored === 'ar' || stored === 'en') {
+        document.cookie = `${LANG_COOKIE}=${stored}; path=/; max-age=${LANG_COOKIE_MAX_AGE}; samesite=lax`;
+      }
     }
-    return 'en';
-  });
+    if (stored && stored !== lang) setLang(stored);
+    // Runs once: it exists only to migrate a pre-cookie session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Apply dir + lang on <html> whenever language changes
   useEffect(() => {
@@ -40,7 +69,11 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
   const toggle = useCallback(() => {
     setLang(prev => {
       const next = prev === 'en' ? 'ar' : 'en';
-      if (typeof window !== 'undefined') localStorage.setItem('app-lang', next);
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem(LANG_COOKIE, next); } catch { /* private mode */ }
+        // The cookie is the one the server reads on the next navigation.
+        document.cookie = `${LANG_COOKIE}=${next}; path=/; max-age=${LANG_COOKIE_MAX_AGE}; samesite=lax`;
+      }
       return next;
     });
   }, []);

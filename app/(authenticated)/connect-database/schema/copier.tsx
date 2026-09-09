@@ -22,7 +22,7 @@ export default function SchemaCopier({ sql }: { sql: string }) {
             <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80 shadow-sm" />
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 shadow-sm" />
           </div>
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-2">client-schema.sql</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ms-2">client-schema.sql</span>
         </div>
         
         <button 

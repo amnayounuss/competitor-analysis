@@ -15,6 +15,12 @@ const CLIENT_MIGRATIONS = [
   '006_review_word_ai.sql',
   '007_gbp_performance.sql',
   '008_review_word_cloud_by_job.sql',
+  '009_competitor_candidates.sql',
+  '010_branch_health.sql',
+  '011_review_sync.sql',
+  '012_dashboard_advisor.sql',
+  '013_review_text_coverage.sql',
+  '014_branches_without_a_job.sql',
 ];
 
 export function schemaNameForUser(userId: string): string {

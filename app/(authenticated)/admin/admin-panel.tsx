@@ -6,6 +6,7 @@ import GmailTab    from './tab-gmail';
 import GmbTab      from './tab-gmb';
 import WorkerTab   from './tab-worker';
 import UsersTab    from './tab-users';
+import { BiInline } from '@/lib/bilingual';
 
 type Tab = 'overview' | 'gmail' | 'gmb' | 'worker' | 'users';
 
@@ -56,7 +57,7 @@ export default function AdminPanel() {
       {loading ? (
         <div className="flex flex-col items-center justify-center py-24 space-y-4 modern-card">
           <div className="w-10 h-10 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin" />
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Synchronizing Settings…</p>
+          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest"><BiInline en="Synchronizing Settings…" /></p>
         </div>
       ) : (
         <div className="modern-card p-10">

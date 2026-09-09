@@ -7,7 +7,10 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 const CreateJob = z.object({
   target_name:     z.string().trim().min(1),
   competitors:     z.array(z.string().trim().min(1)).min(1),
-  refresh_token:   z.string().trim().min(20),
+  // Optional: the account already holds one. Requiring it on every run meant
+  // pasting a 100-character secret each time, and a mistyped one fails the run
+  // at the first stage.
+  refresh_token:   z.string().trim().min(20).optional(),
   email_to:        z.string().trim().email(),
   date_start:      isoDate.optional(),
   date_end:        isoDate.optional(),
@@ -61,8 +64,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'You already have an active job.' }, { status: 409 });
   }
 
+  // Fall back to the token stored for this client. The form only sends one when
+  // the client is deliberately replacing it.
+  let refreshToken = parsed.data.refresh_token;
+  if (!refreshToken) {
+    const { data: stored } = await adminClient()
+      .from('client_databases').select('gmb_refresh_token').eq('user_id', user.id).maybeSingle();
+    refreshToken = stored?.gmb_refresh_token || undefined;
+  }
+  if (!refreshToken) {
+    return NextResponse.json(
+      { error: 'Connect your Google Business Profile first — the analysis reads your branches from it.' },
+      { status: 400 });
+  }
+
+  // A token supplied here becomes the account's token, so the next run needs no
+  // paste at all.
+  if (parsed.data.refresh_token) {
+    await adminClient().from('client_databases')
+      .update({ gmb_refresh_token: parsed.data.refresh_token, updated_at: new Date().toISOString() })
+      .eq('user_id', user.id);
+  }
+
   const { data: job, error } = await sb.from('jobs').insert({
-    user_id: user.id, kind: 'manual', ...parsed.data,
+    user_id: user.id, kind: 'manual', ...parsed.data, refresh_token: refreshToken,
   }).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ job });
